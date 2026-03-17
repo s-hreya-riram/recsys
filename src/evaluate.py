@@ -30,7 +30,7 @@ def hit_rate_at_k(recommendations: dict, test_df: pd.DataFrame, k: int = 10) -> 
     hits = 0
 
     for user_idx, recommended_items in recommendations.items():
-        top_k = recommended_items[:k]
+        top_k = set(recommended_items[:k])
         items_relevant_to_user = relevant_items.get(user_idx, set())
         if (len(top_k.intersection(items_relevant_to_user))>0):
             hits += 1
@@ -119,10 +119,12 @@ def evaluate_all(recommendations: dict, test_df: pd.DataFrame,
     '''
     results = {}
     results['regular'] = evaluate_model(recommendations, test_df, k)
-
+    print(f"Length of coldstart users: {len(cold_start_df)}")
+    print(f"Length of recommendations: {len(recommendations)}")
     if not cold_start_df.empty:
         cold_user_idxs = set(cold_start_df['user_idx'].unique())
         cold_recs = {u: v for u, v in recommendations.items() if u in cold_user_idxs}
+        print(f"Length of coldstart recommendations: {len(cold_recs)}")
         if cold_recs:
             results['cold_start'] = evaluate_model(cold_recs, cold_start_df, k)
 

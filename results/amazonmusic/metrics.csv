@@ -1,0 +1,2 @@
+model,regular_HR@10,regular_NDCG@10,regular_MAP,cold_start_HR@10,cold_start_NDCG@10,cold_start_MAP
+popularity,0.015,0.0076,0.0058,0.1011,0.0282,0.0155

@@ -12,7 +12,7 @@ MOVIELENS_CFG = DatasetConfig(
     name='movielens',
     feedback_type='explicit',
     relevance_threshold=4.0, # configuring this as 4.0 for now, but this may need to be tuned based on the distribution of ratings in the dataset
-    cold_start_threshold=25, # starting value of 25 for now although this may need to be tuned
+    cold_start_threshold=35, # starting value of 35 for now although this may need to be tuned
     rating_col='rating',
 )
 

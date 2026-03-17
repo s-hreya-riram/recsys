@@ -86,7 +86,7 @@ def temporal_split(ratings, train_frac=0.8, val_frac=0.1, cold_start_threshold=1
 
     return train_df, val_df, test_df, cold_start_df
 
-def encode_ids(train_df, val_df, test_df):
+def encode_ids(train_df, val_df, test_df, cold_start_df):
     """
     Fit ID maps on train only, then apply to val/test.
     Unknown IDs in val/test get -1 (truly unseen).
@@ -94,11 +94,22 @@ def encode_ids(train_df, val_df, test_df):
     user_id_map  = {uid: idx for idx, uid in enumerate(train_df['userId'].unique())}
     item_id_map = {mid: idx for idx, mid in enumerate(train_df['itemId'].unique())}
 
-    for df in [train_df, val_df, test_df]:
+    for df in [train_df, val_df, test_df, cold_start_df]:
         df['user_idx']  = df['userId'].map(user_id_map).fillna(-1).astype(int)
         df['item_idx'] = df['itemId'].map(item_id_map).fillna(-1).astype(int)
 
-    return train_df, val_df, test_df, user_id_map, item_id_map
+    # assign cold-start users unique indices starting after train users
+    if not cold_start_df.empty:
+        next_idx = len(user_id_map)
+        cold_user_map = {
+            uid: next_idx + i 
+            for i, uid in enumerate(cold_start_df['userId'].unique())
+        }
+        cold_start_df['user_idx'] = cold_start_df['userId'].map(cold_user_map).astype(int)
+        # items may or may not be in train — use -1 for unseen items
+        cold_start_df['item_idx'] = cold_start_df['itemId'].map(item_id_map).fillna(-1).astype(int)
+
+    return train_df, val_df, test_df, cold_start_df, user_id_map, item_id_map
 
 def write_splits(train_df, val_df, test_df, cold_start_df,
                  output_dir='../../data/processed/movielens'):
@@ -126,5 +137,5 @@ if __name__ == "__main__":
     
     ratings  = LOADERS[args.dataset]()
     train_df, val_df, test_df, cold_start_df = temporal_split(ratings, cold_start_threshold=cfg.cold_start_threshold)
-    train_df, val_df, test_df, user_map, item_map = encode_ids(train_df, val_df, test_df)
+    train_df, val_df, test_df, cold_start_df, user_map, item_map = encode_ids(train_df, val_df, test_df, cold_start_df)
     write_splits(train_df, val_df, test_df, cold_start_df, output_dir=OUTPUT_DIRS[args.dataset])
