@@ -31,7 +31,6 @@ class PopularityModel(BaseModel):
                 if len(results) == k:
                     break
             recommendations[user_id] = results
-        # print(f"Recommendations for user_id 7214: {recommendations.get(7214)}")
         return recommendations
 
 

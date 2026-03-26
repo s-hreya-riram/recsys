@@ -11,10 +11,11 @@ import pandas as pd
 def _get_relevant_items(test_df: pd.DataFrame) -> dict[int, set[int]]:
     '''Returns {user_idx: set of relevant item_idx} from test set.
     For movielens, relevant == 1 means rating >= relevance_threshold.
-    For amazonmusic, all interactions are set to relevant = 1 as we use implicit feedback
+    For amazonmusic, all interactions are set to relevant = 1 as we use implicit feedback.
+    Filters out item_idx == -1 (unseen items that were never encoded).
     '''
     return (
-        test_df[test_df['relevant'] == 1]
+        test_df[(test_df['relevant'] == 1) & (test_df['item_idx'] != -1)]
         .groupby('user_idx')['item_idx']
         .apply(set)
         .to_dict()
@@ -25,6 +26,7 @@ def hit_rate_at_k(recommendations: dict, test_df: pd.DataFrame, k: int = 10) -> 
     '''
     Fraction of users for whom at least one relevant item appears in top-k.
     HR@K = (number of users with at least one hit) / (total users evaluated)
+    Users with no relevant items are included in the denominator (counted as misses).
     '''
     relevant_items = _get_relevant_items(test_df)
     hits = 0
@@ -32,7 +34,7 @@ def hit_rate_at_k(recommendations: dict, test_df: pd.DataFrame, k: int = 10) -> 
     for user_idx, recommended_items in recommendations.items():
         top_k = set(recommended_items[:k])
         items_relevant_to_user = relevant_items.get(user_idx, set())
-        if (len(top_k.intersection(items_relevant_to_user))>0):
+        if top_k.intersection(items_relevant_to_user):
             hits += 1
 
     return hits / len(recommendations) if recommendations else 0.0
@@ -43,6 +45,7 @@ def ndcg_at_k(recommendations: dict, test_df: pd.DataFrame, k: int = 10) -> floa
     Normalized Discounted Cumulative Gain at K.
     Rewards relevant items ranked higher in the list.
     NDCG@K = (1/|users|) * sum_users [ DCG@K / IDCG@K ]
+    Users with no relevant items contribute 0 to the mean.
     '''
     relevant_items = _get_relevant_items(test_df)
     ndcg_scores = []
@@ -67,11 +70,12 @@ def ndcg_at_k(recommendations: dict, test_df: pd.DataFrame, k: int = 10) -> floa
     return float(np.mean(ndcg_scores)) if ndcg_scores else 0.0
 
 
-def mean_average_precision(recommendations: dict, test_df: pd.DataFrame) -> float:
+def mean_average_precision_at_k(recommendations: dict, test_df: pd.DataFrame, k: int = 10) -> float:
     '''
-    Mean Average Precision across all users.
-    AP for a user = (1/|relevant|) * sum_k [ precision@k * is_relevant(k) ]
-    MAP = mean of AP across users.
+    Mean Average Precision at K across all users.
+    AP@K for a user = (1/|relevant|) * sum_{r=1}^{K} [ precision@r * is_relevant(r) ]
+    MAP@K = mean of AP@K across users who have at least one relevant item.
+    Users with no relevant items are excluded from the mean (same as standard IR convention).
     '''
     relevant_items = _get_relevant_items(test_df)
     ap_scores = []
@@ -81,15 +85,16 @@ def mean_average_precision(recommendations: dict, test_df: pd.DataFrame) -> floa
         if not user_relevant:
             continue
 
+        top_k = ranked_items[:k]
         hits = 0
         precision_sum = 0.0
 
-        for rank, item in enumerate(ranked_items, start=1):
+        for rank, item in enumerate(top_k, start=1):
             if item in user_relevant:
                 hits += 1
-                precision_sum += hits / rank   # precision at this rank
+                precision_sum += hits / rank
 
-        ap = precision_sum / len(user_relevant)
+        ap = precision_sum / min(len(user_relevant), k)   # normalise by min(|relevant|, K)
         ap_scores.append(ap)
 
     return float(np.mean(ap_scores)) if ap_scores else 0.0
@@ -98,33 +103,39 @@ def mean_average_precision(recommendations: dict, test_df: pd.DataFrame) -> floa
 def evaluate_model(recommendations: dict, test_df: pd.DataFrame, k: int = 10) -> dict:
     '''
     Runs all three metrics and returns a results dict.
-    Also evaluates cold-start users separately if cold_start_user_idxs is provided.
+    Filters test_df to only users present in recommendations before evaluating.
     '''
-    # filter to users that actually appear in recommendations
     evaluated_users = set(recommendations.keys())
     test_evaluated = test_df[test_df['user_idx'].isin(evaluated_users)]
 
     return {
-        f'HR@{k}':  hit_rate_at_k(recommendations, test_evaluated, k),
+        f'HR@{k}':   hit_rate_at_k(recommendations, test_evaluated, k),
         f'NDCG@{k}': ndcg_at_k(recommendations, test_evaluated, k),
-        'MAP':       mean_average_precision(recommendations, test_evaluated),
+        f'MAP@{k}':  mean_average_precision_at_k(recommendations, test_evaluated, k),
     }
 
 
 def evaluate_all(recommendations: dict, test_df: pd.DataFrame,
                  cold_start_df: pd.DataFrame, k: int = 10) -> dict:
     '''
-    Returns metrics for regular users and cold-start users separately.
-    cold_start_df should be the held-out cold-start interactions.
+    Returns metrics for regular and cold-start users separately.
+    Splits recommendations by user type before evaluation to avoid any cross-contamination.
     '''
     results = {}
-    results['regular'] = evaluate_model(recommendations, test_df, k)
-    print(f"Length of coldstart users: {len(cold_start_df)}")
-    print(f"Length of recommendations: {len(recommendations)}")
+
+    # Regular users: only those present in test_df
+    regular_user_idxs = set(test_df['user_idx'].unique())
+    regular_recs = {u: v for u, v in recommendations.items() if u in regular_user_idxs}
+    results['regular'] = evaluate_model(regular_recs, test_df, k)
+
+    print(f"Regular users evaluated: {len(regular_recs)}")
+    print(f"Cold-start interactions: {len(cold_start_df)}")
+    print(f"Total recommendations generated: {len(recommendations)}")
+
     if not cold_start_df.empty:
         cold_user_idxs = set(cold_start_df['user_idx'].unique())
         cold_recs = {u: v for u, v in recommendations.items() if u in cold_user_idxs}
-        print(f"Length of coldstart recommendations: {len(cold_recs)}")
+        print(f"Cold-start users evaluated: {len(cold_recs)}")
         if cold_recs:
             results['cold_start'] = evaluate_model(cold_recs, cold_start_df, k)
 
