@@ -21,12 +21,20 @@ def tune(cfg):
     train_df = pd.read_csv(base / 'train.csv')
     val_df   = pd.read_csv(base / 'val.csv')
 
-    param_grid = {
-        'emb_dim':      [32, 64],
-        'tower_layers': [[64], [64, 32], [128, 64]],
-        'lr':           [1e-3, 5e-3, 1e-2],
-        'n_neg':        [4, 8],
-    }
+    if cfg.feedback_type == 'explicit':
+        param_grid = {
+            'emb_dim':      [32, 64],
+            'tower_layers': [[64], [64, 32], [128, 64]],
+            'lr':           [1e-4, 5e-4, 1e-3],
+            'n_neg':        [4, 8],
+        }
+    else:
+        param_grid = {
+            'emb_dim':      [32, 64],
+            'tower_layers': [[64], [128, 64]],
+            'lr':           [1e-4, 5e-4, 1e-3],
+            'n_neg':        [8, 32, 64],
+        }
 
     keys   = list(param_grid.keys())
     values = list(param_grid.values())

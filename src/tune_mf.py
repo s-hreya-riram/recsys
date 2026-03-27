@@ -28,10 +28,10 @@ def tune(cfg):
         }
     else:
         param_grid = {
-            'n_factors': [20, 50, 100],
-            'reg':       [0.001, 0.01, 0.1],
+            'n_factors': [50, 100],
+            'reg':       [0.01, 0.1],
             'n_epochs':  [15, 30],
-            'alpha':     [1, 10, 40],
+            'alpha':     [10, 40, 100],
         }
 
     keys   = list(param_grid.keys())

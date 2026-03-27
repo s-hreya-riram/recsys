@@ -2,9 +2,12 @@
 Two-Tower model for recommendation.
 Separate user and item encoder networks combined via dot product.
 The simple inner product enables fast approximate nearest neighbour
-retrieval at inference time — standard architecture for candidate
-generation in industry (YouTube, Google Play, etc.)
-Reference: Covington et al. 2016 - Deep Neural Networks for YouTube Recommendations
+retrieval at inference time. Loss computation is performed using Bayesian Personalised Ranking (BPR), 
+this directly optimises ranking
+by maximising the score gap between observed (positive) and unobserved
+(negative) interactions. More appropriate than pointwise BCE for implicit
+feedback where only positive interactions are observed.
+Reference: Rendle et al. 2009 - BPR: Bayesian Personalized Ranking from Implicit Feedback
 '''
 
 import numpy as np
@@ -21,35 +24,63 @@ from config import DatasetConfig
 
 
 # ------------------------------------------------------------------
-# Dataset — same negative sampling strategy as NCF
+# BPR loss
+# ------------------------------------------------------------------
+
+def bpr_loss(pos_scores: torch.Tensor, neg_scores: torch.Tensor) -> torch.Tensor:
+    '''
+    Bayesian Personalised Ranking loss.
+    Maximises the score margin between positive and negative items.
+    Loss = -mean(log(sigmoid(pos_score - neg_score)))
+    '''
+    return -torch.log(torch.sigmoid(pos_scores - neg_scores) + 1e-8).mean()
+
+
+# ------------------------------------------------------------------
+# Dataset — returns (user, pos_item, neg_item) triplets for BPR
 # ------------------------------------------------------------------
 
 class TwoTowerDataset(Dataset):
-    def __init__(self, df: pd.DataFrame, n_items: int, n_neg: int = 4):
+    def __init__(self, df: pd.DataFrame, n_items: int, n_neg: int = 4,
+                 global_seen: dict = None):
+        '''
+        Args:
+            df:           interactions dataframe (user_idx, item_idx)
+            n_items:      total number of items in the catalogue
+            n_neg:        number of negative samples per positive
+            global_seen:  {user_idx: set(item_idx)} of ALL seen items across
+                          train+val splits — used to avoid sampling true
+                          positives as negatives. If None, uses df only.
+        '''
         self.n_items = n_items
         self.n_neg   = n_neg
-        self.user_positives = df.groupby('user_idx')['item_idx'].apply(set).to_dict()
         self.users   = df['user_idx'].values
         self.items   = df['item_idx'].values
 
+        # use global_seen if provided (avoids train items being sampled as
+        # negatives when computing val loss), otherwise fall back to df
+        if global_seen is not None:
+            self.user_positives = global_seen
+        else:
+            self.user_positives = (
+                df.groupby('user_idx')['item_idx'].apply(set).to_dict()
+            )
+
     def __len__(self):
-        return len(self.users) * (1 + self.n_neg)
+        return len(self.users) * self.n_neg
 
     def __getitem__(self, idx):
-        pos_idx = idx // (1 + self.n_neg)
-        is_neg  = idx  % (1 + self.n_neg) != 0
-        user    = self.users[pos_idx]
-
-        if not is_neg:
-            return (torch.tensor(user),
-                    torch.tensor(self.items[pos_idx]),
-                    torch.tensor(1.0))
+        pos_idx  = idx // self.n_neg
+        user     = self.users[pos_idx]
+        pos_item = self.items[pos_idx]
 
         seen = self.user_positives.get(user, set())
         while True:
             neg_item = np.random.randint(0, self.n_items)
             if neg_item not in seen:
-                return torch.tensor(user), torch.tensor(neg_item), torch.tensor(0.0)
+                return (torch.tensor(user),
+                        torch.tensor(pos_item),
+                        torch.tensor(neg_item))
 
 
 # ------------------------------------------------------------------
@@ -78,9 +109,7 @@ class TwoTowerArchitecture(nn.Module):
         in_dim = emb_dim
         for out_dim in layers:
             tower += [nn.Linear(in_dim, out_dim), nn.ReLU(), nn.Dropout(0.2)]
-            in_dim  = out_dim
-        # final layer projects to output dim without activation
-        # so dot product space is unconstrained
+            in_dim = out_dim
         return nn.Sequential(*tower)
 
     def _init_weights(self):
@@ -94,10 +123,8 @@ class TwoTowerArchitecture(nn.Module):
     def forward(self, user_ids, item_ids):
         user_vec = self.user_tower(self.user_emb(user_ids))  # (batch, out_dim)
         item_vec = self.item_tower(self.item_emb(item_ids))  # (batch, out_dim)
-
-        # dot product then sigmoid
-        score = torch.sigmoid((user_vec * item_vec).sum(dim=-1))  # (batch,)
-        return score
+        # raw dot product — no sigmoid, so BPR loss operates on unconstrained logits
+        return (user_vec * item_vec).sum(dim=-1)             # (batch,)
 
 
 # ------------------------------------------------------------------
@@ -116,7 +143,7 @@ class TwoTowerModel(BaseModel):
                  n_epochs:     int   = 20,
                  patience:     int   = 3):
 
-        self.cfg          = cfg
+        self.cfg = cfg
         if self.cfg.feedback_type != 'implicit':
             # Best params: {'emb_dim': 32, 'tower_layers': [64], 'lr': 0.001, 'n_neg': 4}
             self.emb_dim      = 32
@@ -124,38 +151,47 @@ class TwoTowerModel(BaseModel):
             self.lr           = 0.001
             self.n_neg        = 4
         else:
+            # defaults for implicit — override via tuning
             self.emb_dim      = 32
             self.tower_layers = [64]
-            self.lr           = 0.005
+            self.lr           = 1e-3
             self.n_neg        = 8
 
-        self.batch_size   = batch_size
-        self.n_epochs     = n_epochs
-        self.patience     = patience
+        self.batch_size = batch_size
+        self.n_epochs = 50 if cfg.feedback_type == 'implicit' else 20
+        self.patience   = patience
 
         self.model   = None
         self.n_users = None
         self.n_items = None
-        self.device  = torch.device('mps' if torch.backends.mps.is_available()
-                                    else 'cuda' if torch.cuda.is_available()
-                                    else 'cpu')
+        self.device  = torch.device('mps'  if torch.backends.mps.is_available()  else
+                                    'cuda' if torch.cuda.is_available() else 'cpu')
 
     def fit(self, train_df: pd.DataFrame, val_df: pd.DataFrame) -> None:
         self.n_users = train_df['user_idx'].max() + 1
         self.n_items = train_df['item_idx'].max() + 1
 
-        print(f'    two-tower training on {self.device}: emb={self.emb_dim}, '
-              f'layers={self.tower_layers}, neg={self.n_neg}, lr={self.lr}')
+        print(f'    two-tower [{self.cfg.feedback_type}] on {self.device}: '
+              f'emb={self.emb_dim}, layers={self.tower_layers}, '
+              f'neg={self.n_neg}, lr={self.lr}')
 
         self.model = TwoTowerArchitecture(
             self.n_users, self.n_items, self.emb_dim, self.tower_layers
         ).to(self.device)
 
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        loss_fn   = nn.BCELoss()
+
+        # build global seen dict — val negatives must exclude train positives too
+        train_seen = train_df.groupby('user_idx')['item_idx'].apply(set).to_dict()
+        val_seen   = val_df.groupby('user_idx')['item_idx'].apply(set).to_dict()
+        global_seen = {
+            u: train_seen.get(u, set()) | val_seen.get(u, set())
+            for u in set(train_seen) | set(val_seen)
+        }
 
         train_dataset = TwoTowerDataset(train_df, self.n_items, self.n_neg)
-        val_dataset   = TwoTowerDataset(val_df,   self.n_items, self.n_neg)
+        val_dataset   = TwoTowerDataset(val_df,   self.n_items, self.n_neg,
+                                        global_seen=global_seen)
 
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size,
                                   shuffle=True,  num_workers=0)
@@ -167,27 +203,33 @@ class TwoTowerModel(BaseModel):
         best_weights   = None
 
         for epoch in range(self.n_epochs):
+            # --- train ---
             self.model.train()
             train_loss = 0.0
-            for users, items, labels in train_loader:
-                users, items, labels = (users.to(self.device),
-                                        items.to(self.device),
-                                        labels.to(self.device))
+            for users, pos_items, neg_items in train_loader:
+                users     = users.to(self.device)
+                pos_items = pos_items.to(self.device)
+                neg_items = neg_items.to(self.device)
+
                 optimizer.zero_grad()
-                preds = self.model(users, items)
-                loss  = loss_fn(preds, labels)
+                pos_scores = self.model(users, pos_items)
+                neg_scores = self.model(users, neg_items)
+                loss       = bpr_loss(pos_scores, neg_scores)
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
 
+            # --- val ---
             self.model.eval()
             val_loss = 0.0
             with torch.no_grad():
-                for users, items, labels in val_loader:
-                    users, items, labels = (users.to(self.device),
-                                            items.to(self.device),
-                                            labels.to(self.device))
-                    val_loss += loss_fn(self.model(users, items), labels).item()
+                for users, pos_items, neg_items in val_loader:
+                    users     = users.to(self.device)
+                    pos_items = pos_items.to(self.device)
+                    neg_items = neg_items.to(self.device)
+                    pos_scores = self.model(users, pos_items)
+                    neg_scores = self.model(users, neg_items)
+                    val_loss  += bpr_loss(pos_scores, neg_scores).item()
 
             avg_train = train_loss / len(train_loader)
             avg_val   = val_loss   / len(val_loader)
@@ -216,8 +258,8 @@ class TwoTowerModel(BaseModel):
             .to_dict()
         )
 
-        # precompute all item embeddings once — this is the key efficiency
-        # advantage of two-tower over NCF at inference time
+        # precompute all item embeddings once — key efficiency advantage of
+        # two-tower: item tower only runs once regardless of number of users
         all_item_ids = torch.arange(self.n_items).to(self.device)
         with torch.no_grad():
             all_item_vecs = self.model.item_tower(
@@ -237,7 +279,8 @@ class TwoTowerModel(BaseModel):
                     self.model.user_emb(user_id_t)
                 )  # (1, out_dim)
 
-                # dot product with all items at once
+                # dot product with all items — no sigmoid needed at inference,
+                # ranking order is preserved with raw scores
                 scores = (all_item_vecs * user_vec).sum(dim=-1).cpu().numpy()
 
                 ranked = [

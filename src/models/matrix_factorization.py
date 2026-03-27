@@ -27,8 +27,8 @@ class MatrixFactorizationModel(BaseModel):
             # Best params: {'n_factors': 100, 'reg': 0.1, 'n_epochs': 15, 'alpha': 10}
             self.n_factors = 100
             self.reg       = 0.1
-            self.n_epochs  = 15
-            self.alpha     = 10
+            self.n_epochs  = 30
+            self.alpha     = 100
         self.model          = None
         self.user_factors   = None  # shape (n_users, n_factors)
         self.item_factors   = None  # shape (n_items, n_factors)
@@ -40,6 +40,9 @@ class MatrixFactorizationModel(BaseModel):
             self._fit_svd(train_df)
         else:
             self._fit_als(train_df)
+            print(f"User factors (first 5): {self.user_factors[:5]}")
+            print(f"Item factors (first 5): {self.item_factors[:5]}")
+            print(np.isnan(self.user_factors).any(), np.isnan(self.item_factors).any())
 
     def _fit_svd(self, train_df: pd.DataFrame) -> None:
         from surprise import SVD, Dataset, Reader
@@ -82,9 +85,9 @@ class MatrixFactorizationModel(BaseModel):
 
         # ALS expects a (users, items) sparse matrix of interaction counts
         # alpha scales the confidence: higher interaction count = more confident
-        counts = np.ones(len(train_df))  # binary — each interaction counts as 1
+        train_agg = train_df.groupby(['user_idx', 'item_idx']).size().reset_index(name='count')
         user_item_matrix = csr_matrix(
-            (counts, (train_df['user_idx'], train_df['item_idx'])),
+            (train_agg['count'].values, (train_agg['user_idx'], train_agg['item_idx'])),
             shape=(self.n_users, self.n_items)
         )
 
@@ -97,8 +100,16 @@ class MatrixFactorizationModel(BaseModel):
         # implicit expects (items, users) — transpose
         self.model.fit(user_item_matrix.T * self.alpha)
 
-        self.user_factors = self.model.user_factors  # (n_users, n_factors)
-        self.item_factors = self.model.item_factors  # (n_items, n_factors)
+        self.user_factors = self.model.item_factors  # (n_users, n_factors)
+        self.item_factors = self.model.user_factors  # (n_items, n_factors)
+        print(f" Shape of user_factors: {self.user_factors.shape}, item_factors: {self.item_factors.shape}")
+
+        user_vec = self.user_factors[0]
+        scores = self.item_factors @ user_vec
+        print(scores.min(), scores.max(), scores.std())
+        print(f"user_factors shape: {self.user_factors.shape}")  # should be (n_users, n_factors)
+        print(f"item_factors shape: {self.item_factors.shape}")  # should be (n_items, n_factors)
+        print(f"Expected: users={self.n_users}, items={self.n_items}")
 
     def recommend(self, user_ids: list, train_df: pd.DataFrame, k: int = 10) -> dict[int, list[int]]:
         if self.cfg.feedback_type == 'explicit':
