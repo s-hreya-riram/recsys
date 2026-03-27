@@ -133,10 +133,19 @@ class NCFModel(BaseModel):
                  patience:   int  = 3):
 
         self.cfg        = cfg
-        self.emb_dim    = emb_dim
-        self.mlp_layers = mlp_layers or [64, 32, 16]
-        self.n_neg      = n_neg
-        self.lr         = lr
+        if self.cfg.feedback_type == 'explicit':
+            # Best params: {'emb_dim': 32, 'mlp_layers': [64, 32, 16], 'lr': 0.005, 'n_neg': 4}
+            self.emb_dim    = 32
+            self.mlp_layers = [64, 32, 16]
+            self.n_neg      = 4
+            self.lr         = 0.005
+        else:
+            # Best params: {'emb_dim': 64, 'mlp_layers': [64, 32, 16], 'lr': 0.001, 'n_neg': 4}
+            self.emb_dim    = 64
+            self.mlp_layers = [64, 32, 16]
+            self.n_neg      = 4
+            self.lr         = 0.001
+
         self.batch_size = batch_size
         self.n_epochs   = n_epochs
         self.patience   = patience   # early stopping

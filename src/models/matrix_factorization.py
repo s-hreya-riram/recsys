@@ -24,11 +24,11 @@ class MatrixFactorizationModel(BaseModel):
             self.reg       = 0.001
             self.n_epochs  = 50
         else:
-            # Best params: {'n_factors': 50, 'reg': 0.1, 'n_epochs': 30, 'alpha': 40}
-            self.n_factors = 50
+            # Best params: {'n_factors': 100, 'reg': 0.1, 'n_epochs': 15, 'alpha': 10}
+            self.n_factors = 100
             self.reg       = 0.1
-            self.n_epochs  = 30
-            self.alpha     = 40
+            self.n_epochs  = 15
+            self.alpha     = 10
         self.model          = None
         self.user_factors   = None  # shape (n_users, n_factors)
         self.item_factors   = None  # shape (n_items, n_factors)
