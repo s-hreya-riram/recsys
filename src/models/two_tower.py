@@ -140,25 +140,25 @@ class TwoTowerModel(BaseModel):
                  n_neg:        int   = 4,
                  lr:           float = 1e-3,
                  batch_size:   int   = 256,
-                 n_epochs:     int   = 20,
+                 n_epochs:     int   = 10,
                  patience:     int   = 3):
 
         self.cfg = cfg
         if self.cfg.feedback_type != 'implicit':
-            # Best params: {'emb_dim': 32, 'tower_layers': [64], 'lr': 0.001, 'n_neg': 4}
-            self.emb_dim      = 32
-            self.tower_layers = [64]
+            # Best params: {'emb_dim': 64, 'tower_layers': [128, 64], 'lr': 0.001, 'n_neg': 4}
+            self.emb_dim      = 64
+            self.tower_layers = [128, 64]
             self.lr           = 0.001
             self.n_neg        = 4
         else:
-            # defaults for implicit — override via tuning
-            self.emb_dim      = 32
-            self.tower_layers = [64]
-            self.lr           = 1e-3
+            # Best params: {'emb_dim': 64, 'tower_layers': [128, 64], 'lr': 0.005, 'n_neg': 8}
+            self.emb_dim      = 64
+            self.tower_layers = [128, 64]
+            self.lr           = 0.005
             self.n_neg        = 8
 
         self.batch_size = batch_size
-        self.n_epochs = 50 if cfg.feedback_type == 'implicit' else 20
+        self.n_epochs = n_epochs
         self.patience   = patience
 
         self.model   = None

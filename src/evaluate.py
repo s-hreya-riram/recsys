@@ -70,11 +70,9 @@ def ndcg_at_k(recommendations: dict, test_df: pd.DataFrame, k: int = 10) -> floa
     return float(np.mean(ndcg_scores)) if ndcg_scores else 0.0
 
 
-def mean_average_precision_at_k(recommendations: dict, test_df: pd.DataFrame, k: int = 10) -> float:
+def mean_average_precision(recommendations: dict, test_df: pd.DataFrame) -> float:
     '''
-    Mean Average Precision at K across all users.
-    AP@K for a user = (1/|relevant|) * sum_{r=1}^{K} [ precision@r * is_relevant(r) ]
-    MAP@K = mean of AP@K across users who have at least one relevant item.
+    Mean Average Precision across all users.
     Users with no relevant items are excluded from the mean (same as standard IR convention).
     '''
     relevant_items = _get_relevant_items(test_df)
@@ -85,16 +83,15 @@ def mean_average_precision_at_k(recommendations: dict, test_df: pd.DataFrame, k:
         if not user_relevant:
             continue
 
-        top_k = ranked_items[:k]
         hits = 0
         precision_sum = 0.0
 
-        for rank, item in enumerate(top_k, start=1):
+        for rank, item in enumerate(ranked_items, start=1):
             if item in user_relevant:
                 hits += 1
                 precision_sum += hits / rank
 
-        ap = precision_sum / min(len(user_relevant), k)   # normalise by min(|relevant|, K)
+        ap = precision_sum / len(user_relevant)
         ap_scores.append(ap)
 
     return float(np.mean(ap_scores)) if ap_scores else 0.0
@@ -111,7 +108,7 @@ def evaluate_model(recommendations: dict, test_df: pd.DataFrame, k: int = 10) ->
     return {
         f'HR@{k}':   hit_rate_at_k(recommendations, test_evaluated, k),
         f'NDCG@{k}': ndcg_at_k(recommendations, test_evaluated, k),
-        f'MAP@{k}':  mean_average_precision_at_k(recommendations, test_evaluated, k),
+        f'MAP':  mean_average_precision(recommendations, test_evaluated),
     }
 
 

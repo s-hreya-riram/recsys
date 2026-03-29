@@ -24,16 +24,16 @@ def tune(cfg):
     if cfg.feedback_type == 'explicit':
         param_grid = {
             'emb_dim':      [32, 64],
-            'tower_layers': [[64], [64, 32], [128, 64]],
-            'lr':           [1e-4, 5e-4, 1e-3],
+            'tower_layers': [[64], [128, 64]],
+            'lr':           [1e-3, 5e-3],
             'n_neg':        [4, 8],
         }
     else:
         param_grid = {
             'emb_dim':      [32, 64],
             'tower_layers': [[64], [128, 64]],
-            'lr':           [1e-4, 5e-4, 1e-3],
-            'n_neg':        [8, 32, 64],
+            'lr':           [1e-3, 5e-3],
+            'n_neg':        [4, 8],
         }
 
     keys   = list(param_grid.keys())
@@ -51,8 +51,8 @@ def tune(cfg):
             tower_layers=params['tower_layers'],
             lr=params['lr'],
             n_neg=params['n_neg'],
-            n_epochs=20,
-            patience=5,
+            n_epochs=10,
+            patience=3,
         )
         model.fit(train_df, val_df)
 

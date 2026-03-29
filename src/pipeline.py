@@ -92,10 +92,22 @@ def run_pipeline(cfg, skip_preprocess=False):
     ]
 
     all_results = []
-    for model in models:
-        print(f'\n  Fitting {model.name}...')
-        model.fit(train_df, val_df)
 
+    import time
+
+    for model in models:
+        print(f'\n Fitting the {model.name} model')
+        
+        # training time
+        train_start = time.time()
+        model.fit(train_df, val_df)
+        train_time = time.time() - train_start
+        print(f'  training time: {train_time:.4f}s')
+
+        # recommendation + evaluation time
+        eval_start = time.time()
+        user_ids = (test_df['user_idx'].unique().tolist() + 
+                    cold_start_df['user_idx'].unique().tolist())
         # Generate recommendations separately for each user group.
         # Cold-start users are not in train_df so models handle them differently
         # (e.g. fallback to popularity). Keeping them separate avoids any
@@ -106,9 +118,15 @@ def run_pipeline(cfg, skip_preprocess=False):
         # Merge for evaluate_all, which will re-split by user type
         recommendations = {**regular_recs, **cold_start_recs}
         results = evaluate_all(recommendations, test_df, cold_start_df, k=10)
+        eval_time = time.time() - eval_start
+        print(f'  eval time: {eval_time:.4f}s')
 
-        # Flatten results into one row per model
-        row = {'model': model.name}
+        # store times in results row
+        row = {
+            'model':         model.name,
+            'train_time_s':  round(train_time, 4),
+            'eval_time_s':   round(eval_time, 4),
+        }
         for split, metrics in results.items():
             for metric, value in metrics.items():
                 row[f'{split}_{metric}'] = round(value, 4)
