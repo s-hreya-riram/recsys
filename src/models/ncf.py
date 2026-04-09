@@ -270,3 +270,70 @@ class NCFModel(BaseModel):
                 recommendations[user_idx] = ranked
 
         return recommendations
+    
+    def recommend_cold_start(self, user_ids: list, context_df: pd.DataFrame,
+                         train_df: pd.DataFrame, k: int = 10) -> dict[int, list[int]]:
+        self.model.eval()
+
+        popular_items = (
+            train_df.groupby('item_idx').size()
+            .sort_values(ascending=False).index.tolist()
+        )
+
+        valid_context = context_df[context_df['item_idx'] != -1]
+        user_context  = (
+            valid_context.groupby('user_idx')['item_idx']
+            .apply(list).to_dict()
+        )
+
+        all_items = torch.arange(self.n_items).to(self.device)
+        recommendations = {}
+        n_fallback = 0
+        n_embedding = 0
+
+        with torch.no_grad():
+            for user_idx in user_ids:
+                context_items = user_context.get(user_idx, [])
+                user_seen     = set(context_items)
+
+                if not context_items:
+                    n_fallback += 1
+                    recommendations[user_idx] = [
+                        i for i in popular_items if i not in user_seen
+                    ][:k]
+                    continue
+                n_embedding += 1
+                context_tensor = torch.tensor(context_items).to(self.device)
+
+                # average item embeddings from context as proxy user vector
+                # use both GMF and MLP item embeddings since NCF has two branches
+                gmf_item_vecs  = self.model.gmf_item_emb(context_tensor)
+                mlp_item_vecs  = self.model.mlp_item_emb(context_tensor)
+                proxy_gmf      = gmf_item_vecs.mean(dim=0, keepdim=True)  # (1, emb_dim)
+                proxy_mlp      = mlp_item_vecs.mean(dim=0, keepdim=True)  # (1, emb_dim)
+
+                # score all items using proxy vectors
+                # replicate proxy across all items for batch scoring
+                all_gmf_items  = self.model.gmf_item_emb(all_items)       # (n_items, emb_dim)
+                all_mlp_items  = self.model.mlp_item_emb(all_items)       # (n_items, emb_dim)
+
+                gmf_out        = proxy_gmf * all_gmf_items                # (n_items, emb_dim)
+                mlp_in         = torch.cat([
+                    proxy_mlp.expand(self.n_items, -1),
+                    all_mlp_items
+                ], dim=-1)                                                 # (n_items, 2*emb_dim)
+                mlp_out        = self.model.mlp(mlp_in)                   # (n_items, last_dim)
+                combined       = torch.cat([gmf_out, mlp_out], dim=-1)
+                scores         = torch.sigmoid(
+                    self.model.predict(combined)
+                ).squeeze(-1).cpu().numpy()                               # (n_items,)
+
+                ranked = [
+                    int(i) for i in np.argsort(scores)[::-1]
+                    if int(i) not in user_seen
+                ][:k]
+                recommendations[user_idx] = ranked
+            print(f'    [{self.name}] cold-start: {n_embedding} embedding, {n_fallback} popularity fallback '
+                  f'({100*n_fallback/len(user_ids):.0f}% fallback)')
+
+        return recommendations

@@ -128,6 +128,42 @@ def write_splits(train_df, val_df, test_df, cold_start_df,
     cold_start_user_count = cold_start_df['userId'].nunique() if not cold_start_df.empty else 0
     print(f"Cold-start users: {cold_start_user_count:,}")
 
+def split_cold_start(cold_start_df: pd.DataFrame, context_size: int = 3):
+    '''
+    Splits cold-start user interactions into context and test portions.
+    
+    Context = first context_size interactions (chronological) — used as 
+    input to the model at inference time to approximate user preference.
+    
+    Test = remaining interactions — used as ground truth for evaluation.
+    
+    Users with <= context_size interactions are skipped entirely since
+    there is nothing left to evaluate against after context is used.
+    '''
+    context_list = []
+    test_list    = []
+    skipped      = 0
+
+    for _, group in cold_start_df.groupby('userId'):
+        group = group.sort_values('timestamp')
+        n     = len(group)
+
+        if n <= context_size:
+            # not enough interactions to have both context and test
+            skipped += 1
+            continue
+
+        context_list.append(group.iloc[:context_size])
+        test_list.append(group.iloc[context_size:])
+
+    context_df = pd.concat(context_list, ignore_index=True) if context_list else pd.DataFrame()
+    test_df    = pd.concat(test_list,    ignore_index=True) if test_list    else pd.DataFrame()
+
+    print(f"Cold-start split: {context_df['userId'].nunique() if not context_df.empty else 0} users with context, "
+          f"{skipped} skipped (too few interactions)")
+
+    return context_df, test_df
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', choices=['movielens', 'amazonmusic'], required=True)

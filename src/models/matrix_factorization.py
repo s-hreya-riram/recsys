@@ -97,15 +97,16 @@ class MatrixFactorizationModel(BaseModel):
             iterations=self.n_epochs,
             calculate_training_loss=True,
         )
-        # implicit expects (items, users) — transpose
-        self.model.fit(user_item_matrix.T * self.alpha)
 
-        self.user_factors = self.model.item_factors  # (n_users, n_factors)
-        self.item_factors = self.model.user_factors  # (n_items, n_factors)
+        self.model.fit(user_item_matrix * self.alpha)
+
+        self.user_factors = self.model.user_factors  # (n_users, n_factors)
+        self.item_factors = self.model.item_factors  # (n_items, n_factors) 
+
         print(f" Shape of user_factors: {self.user_factors.shape}, item_factors: {self.item_factors.shape}")
 
         user_vec = self.user_factors[0]
-        scores = self.item_factors @ user_vec
+        scores = self.item_factors @ user_vec 
         print(scores.min(), scores.max(), scores.std())
         print(f"user_factors shape: {self.user_factors.shape}")  # should be (n_users, n_factors)
         print(f"item_factors shape: {self.item_factors.shape}")  # should be (n_items, n_factors)
@@ -197,4 +198,80 @@ class MatrixFactorizationModel(BaseModel):
 
             recommendations[user_idx] = ranked
 
+        return recommendations
+    
+    def recommend_cold_start(self, user_ids: list, context_df: pd.DataFrame,
+                            train_df: pd.DataFrame, k: int = 10) -> dict[int, list[int]]:
+        if self.cfg.feedback_type == 'explicit':
+            # SVD has no fold-in support — fall back to popularity
+            return super().recommend_cold_start(user_ids, context_df, train_df, k)
+        else:
+            return self._recommend_cold_start_als(user_ids, context_df, train_df, k)
+
+    def _recommend_cold_start_als(self, user_ids: list, context_df: pd.DataFrame,
+                                train_df: pd.DataFrame, k: int) -> dict[int, list[int]]:
+        from scipy.sparse import csr_matrix
+
+        n_fallback = 0
+        n_embedding = 0
+        n_items = train_df['item_idx'].max() + 1
+
+        # precompute popular items for fallback
+        popular_items = (
+            train_df.groupby('item_idx').size()
+            .sort_values(ascending=False).index.tolist()
+        )
+
+        if context_df.empty or 'item_idx' not in context_df.columns:
+            # fall back to popularity for all users
+            popular_items = (
+                train_df.groupby('item_idx').size()
+                .sort_values(ascending=False).index.tolist()
+            )
+            return {uid: popular_items[:k] for uid in user_ids}
+
+        valid_context = context_df[context_df['item_idx'] != -1]
+
+        user_context  = (
+            valid_context.groupby('user_idx')['item_idx']
+            .apply(list).to_dict()
+        )
+
+        recommendations = {}
+        for user_idx in user_ids:
+            context_items = user_context.get(user_idx, [])
+            user_seen     = set(context_items)
+
+            if not context_items:
+                # no valid context — fall back to popularity
+                recommendations[user_idx] = [
+                    i for i in popular_items if i not in user_seen
+                ][:k]
+                n_fallback += 1
+                continue
+
+            n_embedding += 1
+            # build sparse interaction vector for this user
+            data = np.ones(len(context_items))
+            rows = np.zeros(len(context_items), dtype=int)
+            cols = np.array(context_items)
+
+            # fold-in: compute optimal user vector given fixed item factors
+            # recalculate_user returns the user vector that minimises ALS loss
+            # for this user's interactions while keeping all item factors fixed
+            user_interactions = csr_matrix(
+                (data, (rows, cols)), shape=(1, n_items)
+            ) * self.alpha
+
+            user_vec = self.model.recalculate_user(0, user_interactions)
+            scores = self.item_factors @ user_vec
+
+            ranked = [
+                int(i) for i in np.argsort(scores)[::-1]
+                if int(i) not in user_seen
+            ][:k]
+            recommendations[user_idx] = ranked
+
+        print(f'    [{self.name}] cold-start: {n_embedding} embedding, {n_fallback} popularity fallback '
+          f'({100*n_fallback/len(user_ids):.0f}% fallback)')
         return recommendations

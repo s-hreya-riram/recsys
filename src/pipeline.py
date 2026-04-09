@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config import MOVIELENS_CFG, AMAZON_CFG
-from data.preprocessing import LOADERS, OUTPUT_DIRS, temporal_split, encode_ids, write_splits
+from data.preprocessing import LOADERS, OUTPUT_DIRS, temporal_split, encode_ids, write_splits, split_cold_start
 from models.popularity import PopularityModel
 from models.matrix_factorization import MatrixFactorizationModel
 from models.ncf import NCFModel
@@ -74,9 +74,15 @@ def run_pipeline(cfg, skip_preprocess=False):
     # Load splits
     train_df, val_df, test_df, cold_start_df = load_splits(cfg)
 
+    cold_start_context_df, cold_start_test_df = split_cold_start(cold_start_df, context_size=3)
+
+    cold_start_user_ids = (
+        cold_start_context_df['user_idx'].unique().tolist()
+        if not cold_start_context_df.empty else []
+    )
+
     # Separate user ID lists up front — no mixing between evaluation sets
     regular_user_ids    = test_df['user_idx'].unique().tolist()
-    cold_start_user_ids = cold_start_df['user_idx'].unique().tolist() if not cold_start_df.empty else []
 
     print(f"\n Unique regular user IDs in test set:  {len(regular_user_ids)}")
     print(f" Unique cold-start user IDs:           {len(cold_start_user_ids)}")
@@ -96,36 +102,28 @@ def run_pipeline(cfg, skip_preprocess=False):
     import time
 
     for model in models:
-        print(f'\n Fitting the {model.name} model')
-        
-        # training time
+        print(f'\n  Fitting {model.name}...')
+
         train_start = time.time()
         model.fit(train_df, val_df)
-        train_time = time.time() - train_start
+        train_time  = time.time() - train_start
         print(f'  training time: {train_time:.4f}s')
 
-        # recommendation + evaluation time
-        eval_start = time.time()
-        user_ids = (test_df['user_idx'].unique().tolist() + 
-                    cold_start_df['user_idx'].unique().tolist())
-        # Generate recommendations separately for each user group.
-        # Cold-start users are not in train_df so models handle them differently
-        # (e.g. fallback to popularity). Keeping them separate avoids any
-        # accidental bleed into regular evaluation.
-        regular_recs    = model.recommend(regular_user_ids, train_df, k=10)
-        cold_start_recs = model.recommend(cold_start_user_ids, train_df, k=10) if cold_start_user_ids else {}
-
-        # Merge for evaluate_all, which will re-split by user type
-        recommendations = {**regular_recs, **cold_start_recs}
-        results = evaluate_all(recommendations, test_df, cold_start_df, k=10)
+        eval_start     = time.time()
+        regular_recs   = model.recommend(regular_user_ids, train_df, k=10)
+        cold_start_recs = model.recommend_cold_start(
+            cold_start_user_ids, cold_start_context_df, train_df, k=10
+        ) if cold_start_user_ids else {}
         eval_time = time.time() - eval_start
         print(f'  eval time: {eval_time:.4f}s')
 
-        # store times in results row
+        recommendations = {**regular_recs, **cold_start_recs}
+        results = evaluate_all(recommendations, test_df, cold_start_test_df, k=10)
+
         row = {
-            'model':         model.name,
-            'train_time_s':  round(train_time, 4),
-            'eval_time_s':   round(eval_time, 4),
+            'model':        model.name,
+            'train_time_s': round(train_time, 4),
+            'eval_time_s':  round(eval_time, 4),
         }
         for split, metrics in results.items():
             for metric, value in metrics.items():

@@ -111,29 +111,28 @@ def evaluate_model(recommendations: dict, test_df: pd.DataFrame, k: int = 10) ->
         f'MAP':  mean_average_precision(recommendations, test_evaluated),
     }
 
-
 def evaluate_all(recommendations: dict, test_df: pd.DataFrame,
-                 cold_start_df: pd.DataFrame, k: int = 10) -> dict:
+                 cold_start_test_df: pd.DataFrame, k: int = 10) -> dict:
     '''
     Returns metrics for regular and cold-start users separately.
     Splits recommendations by user type before evaluation to avoid any cross-contamination.
     '''
     results = {}
 
-    # Regular users: only those present in test_df
+    # regular users
     regular_user_idxs = set(test_df['user_idx'].unique())
     regular_recs = {u: v for u, v in recommendations.items() if u in regular_user_idxs}
     results['regular'] = evaluate_model(regular_recs, test_df, k)
 
     print(f"Regular users evaluated: {len(regular_recs)}")
-    print(f"Cold-start interactions: {len(cold_start_df)}")
+    print(f"Cold-start interactions: {len(cold_start_test_df)}")
     print(f"Total recommendations generated: {len(recommendations)}")
 
-    if not cold_start_df.empty:
-        cold_user_idxs = set(cold_start_df['user_idx'].unique())
+    # cold-start users — evaluate against test portion only, not context
+    if not cold_start_test_df.empty:
+        cold_user_idxs = set(cold_start_test_df['user_idx'].unique())
         cold_recs = {u: v for u, v in recommendations.items() if u in cold_user_idxs}
-        print(f"Cold-start users evaluated: {len(cold_recs)}")
         if cold_recs:
-            results['cold_start'] = evaluate_model(cold_recs, cold_start_df, k)
+            results['cold_start'] = evaluate_model(cold_recs, cold_start_test_df, k)
 
     return results

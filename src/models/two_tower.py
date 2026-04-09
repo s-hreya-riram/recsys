@@ -291,3 +291,63 @@ class TwoTowerModel(BaseModel):
                 recommendations[user_idx] = ranked
 
         return recommendations
+    
+    def recommend_cold_start(self, user_ids: list, context_df: pd.DataFrame,
+                         train_df: pd.DataFrame, k: int = 10) -> dict[int, list[int]]:
+        self.model.eval()
+
+        popular_items = (
+            train_df.groupby('item_idx').size()
+            .sort_values(ascending=False).index.tolist()
+        )
+
+        valid_context = context_df[context_df['item_idx'] != -1]
+        user_context  = (
+            valid_context.groupby('user_idx')['item_idx']
+            .apply(list).to_dict()
+        )
+
+        # precompute all item vectors once
+        all_item_ids = torch.arange(self.n_items).to(self.device)
+        with torch.no_grad():
+            all_item_vecs = self.model.item_tower(
+                self.model.item_emb(all_item_ids)
+            )  # (n_items, out_dim)
+
+        recommendations = {}
+        n_fallback = 0
+        n_embedding = 0
+        with torch.no_grad():
+            for user_idx in user_ids:
+                context_items = user_context.get(user_idx, [])
+                user_seen     = set(context_items)
+
+
+                if not context_items:
+                    n_fallback += 1
+                    recommendations[user_idx] = [
+                        i for i in popular_items if i not in user_seen
+                    ][:k]
+                    continue
+                n_embedding += 1
+                context_tensor = torch.tensor(context_items).to(self.device)
+
+                # average item tower outputs as proxy user vector
+                # this uses the full item tower (embedding + MLP), not just embeddings
+                # giving a richer representation than raw embeddings alone
+                item_vecs  = self.model.item_tower(
+                    self.model.item_emb(context_tensor)
+                )                                           # (n_context, out_dim)
+                user_proxy = item_vecs.mean(dim=0, keepdim=True)  # (1, out_dim)
+
+                scores = (all_item_vecs * user_proxy).sum(dim=-1).cpu().numpy()
+
+                ranked = [
+                    int(i) for i in np.argsort(scores)[::-1]
+                    if int(i) not in user_seen
+                ][:k]
+                recommendations[user_idx] = ranked
+            print(f'    [{self.name}] cold-start: {n_embedding} embedding, {n_fallback} popularity fallback '
+                      f'({100*n_fallback/len(user_ids):.0f}% fallback)')
+
+        return recommendations
