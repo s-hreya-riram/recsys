@@ -42,10 +42,10 @@ def tune(cfg):
     print(f"val users out of range: {(val_df['user_idx'] >= n_users).sum()}")
 
     param_grid = {
-        'emb_dim':    [32, 64, 128],
-        'mlp_layers': [[64, 32, 16], [128, 64, 32], [256, 128, 64]],
-        'lr':         [1e-3, 5e-3, 1e-2],
-        'n_neg':      [4, 8, 16],
+        'emb_dim':    [32, 64],
+        'mlp_layers': [[64, 32, 16], [128, 64, 32]],
+        'lr':         [1e-3, 5e-3],
+        'n_neg':      [4, 8],
     }
 
     keys   = list(param_grid.keys())
@@ -63,7 +63,7 @@ def tune(cfg):
             mlp_layers=params['mlp_layers'],
             lr=params['lr'],
             n_neg=params['n_neg'],
-            n_epochs=100,
+            n_epochs=30,
             patience=5,
         )
         model.fit(train_df, val_df)

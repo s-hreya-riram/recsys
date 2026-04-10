@@ -148,7 +148,7 @@ class NCFModel(BaseModel):
 
         self.batch_size = batch_size
         self.n_epochs   = n_epochs
-        self.patience   = patience   # early stopping
+        self.patience   = patience   # early stopping patience (in epochs, based on val NDCG@10)
 
         self.model    = None
         self.n_users  = None
@@ -158,15 +158,17 @@ class NCFModel(BaseModel):
                                      else 'cpu')
 
     def fit(self, train_df: pd.DataFrame, val_df: pd.DataFrame) -> None:
+        from evaluate import evaluate_model
+
         train_df = train_df[
-            (train_df['user_idx'] >= 0) & 
+            (train_df['user_idx'] >= 0) &
             (train_df['item_idx'] >= 0)
         ].copy()
         val_df = val_df[
-            (val_df['user_idx'] >= 0) & 
+            (val_df['user_idx'] >= 0) &
             (val_df['item_idx'] >= 0)
         ].copy()
-        
+
         self.n_users = train_df['user_idx'].max() + 1
         self.n_items = train_df['item_idx'].max() + 1
 
@@ -177,8 +179,8 @@ class NCFModel(BaseModel):
             self.n_users, self.n_items, self.emb_dim, self.mlp_layers
         ).to(self.device)
 
-        optimizer  = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        loss_fn    = nn.BCELoss()
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
+        loss_fn   = nn.BCELoss()
 
         import random
 
@@ -187,21 +189,18 @@ class NCFModel(BaseModel):
             random.seed(42 + worker_id)
 
         train_dataset = InteractionDataset(train_df, self.n_items, self.n_neg)
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size,
-                                shuffle=True, num_workers=0,
-                                worker_init_fn=seed_worker)
+        train_loader  = DataLoader(train_dataset, batch_size=self.batch_size,
+                                   shuffle=True, num_workers=0,
+                                   worker_init_fn=seed_worker)
 
-        val_dataset = InteractionDataset(val_df, self.n_items, self.n_neg)
+        val_user_ids  = val_df['user_idx'].unique().tolist()
 
-        val_loader = DataLoader(val_dataset, batch_size=self.batch_size,
-                                shuffle=False, num_workers=0,
-                                worker_init_fn=seed_worker)
-
-        best_val_loss  = float('inf')
+        best_val_ndcg  = -1.0
         patience_count = 0
+        best_weights   = None
 
         for epoch in range(self.n_epochs):
-            # training
+            # --- train ---
             self.model.train()
             train_loss = 0.0
             for users, items, labels in train_loader:
@@ -215,37 +214,34 @@ class NCFModel(BaseModel):
                 optimizer.step()
                 train_loss += loss.item()
 
-            # validation
-            self.model.eval()
-            val_loss = 0.0
-            with torch.no_grad():
-                for users, items, labels in val_loader:
-                    users, items, labels = (users.to(self.device),
-                                            items.to(self.device),
-                                            labels.to(self.device))
-                    preds     = self.model(users, items)
-                    val_loss += loss_fn(preds, labels).item()
-
             avg_train = train_loss / len(train_loader)
-            avg_val   = val_loss   / len(val_loader)
-            print(f'      epoch {epoch+1}/{self.n_epochs} '
-                  f'train_loss={avg_train:.4f} val_loss={avg_val:.4f}')
 
-            # early stopping
-            if avg_val < best_val_loss:
-                best_val_loss  = avg_val
+            # --- val: evaluate ranking quality directly ---
+            # BCE val loss is a poor early stopping signal for ranking tasks —
+            # it increases monotonically as the model assigns higher confidence
+            # to negatives it has never seen. NDCG@10 on val reflects actual
+            # recommendation quality and is the correct signal to use here.
+            self.model.eval()
+            val_recs    = self.recommend(val_user_ids, train_df, k=10)
+            val_metrics = evaluate_model(val_recs, val_df, k=10)
+            val_ndcg    = val_metrics['NDCG@10']
+
+            print(f'      epoch {epoch+1}/{self.n_epochs} '
+                  f'train_loss={avg_train:.4f} val_NDCG@10={val_ndcg:.4f}')
+
+            # early stopping on val NDCG@10
+            if val_ndcg > best_val_ndcg:
+                best_val_ndcg  = val_ndcg
                 patience_count = 0
-                # save best model weights
-                best_weights = {k: v.clone() for k, v in self.model.state_dict().items()}
+                best_weights   = {k: v.clone() for k, v in self.model.state_dict().items()}
             else:
                 patience_count += 1
                 if patience_count >= self.patience:
                     print(f'      early stopping at epoch {epoch+1}')
                     break
 
-        # restore best weights
         self.model.load_state_dict(best_weights)
-        print(f'      best val loss: {best_val_loss:.4f}')
+        print(f'      best val NDCG@10: {best_val_ndcg:.4f}')
 
     def recommend(self, user_ids: list, train_df: pd.DataFrame, k: int = 10) -> dict[int, list[int]]:
         self.model.eval()
@@ -266,7 +262,7 @@ class NCFModel(BaseModel):
                     recommendations[user_idx] = []
                     continue
 
-                user_seen  = seen_items.get(user_idx, set())
+                user_seen   = seen_items.get(user_idx, set())
                 user_tensor = torch.tensor([user_idx] * self.n_items).to(self.device)
 
                 scores = self.model(user_tensor, all_items).cpu().numpy()
@@ -279,9 +275,9 @@ class NCFModel(BaseModel):
                 recommendations[user_idx] = ranked
 
         return recommendations
-    
+
     def recommend_cold_start(self, user_ids: list, context_df: pd.DataFrame,
-                         train_df: pd.DataFrame, k: int = 10) -> dict[int, list[int]]:
+                             train_df: pd.DataFrame, k: int = 10) -> dict[int, list[int]]:
         self.model.eval()
 
         popular_items = (
@@ -295,7 +291,7 @@ class NCFModel(BaseModel):
             .apply(list).to_dict()
         )
 
-        all_items = torch.arange(self.n_items).to(self.device)
+        all_items  = torch.arange(self.n_items).to(self.device)
         recommendations = {}
         n_fallback = 0
         n_embedding = 0
@@ -311,29 +307,29 @@ class NCFModel(BaseModel):
                         i for i in popular_items if i not in user_seen
                     ][:k]
                     continue
+
                 n_embedding += 1
                 context_tensor = torch.tensor(context_items).to(self.device)
 
                 # average item embeddings from context as proxy user vector
                 # use both GMF and MLP item embeddings since NCF has two branches
-                gmf_item_vecs  = self.model.gmf_item_emb(context_tensor)
-                mlp_item_vecs  = self.model.mlp_item_emb(context_tensor)
-                proxy_gmf      = gmf_item_vecs.mean(dim=0, keepdim=True)  # (1, emb_dim)
-                proxy_mlp      = mlp_item_vecs.mean(dim=0, keepdim=True)  # (1, emb_dim)
+                gmf_item_vecs = self.model.gmf_item_emb(context_tensor)
+                mlp_item_vecs = self.model.mlp_item_emb(context_tensor)
+                proxy_gmf     = gmf_item_vecs.mean(dim=0, keepdim=True)  # (1, emb_dim)
+                proxy_mlp     = mlp_item_vecs.mean(dim=0, keepdim=True)  # (1, emb_dim)
 
                 # score all items using proxy vectors
-                # replicate proxy across all items for batch scoring
-                all_gmf_items  = self.model.gmf_item_emb(all_items)       # (n_items, emb_dim)
-                all_mlp_items  = self.model.mlp_item_emb(all_items)       # (n_items, emb_dim)
+                all_gmf_items = self.model.gmf_item_emb(all_items)       # (n_items, emb_dim)
+                all_mlp_items = self.model.mlp_item_emb(all_items)       # (n_items, emb_dim)
 
-                gmf_out        = proxy_gmf * all_gmf_items                # (n_items, emb_dim)
-                mlp_in         = torch.cat([
+                gmf_out   = proxy_gmf * all_gmf_items                    # (n_items, emb_dim)
+                mlp_in    = torch.cat([
                     proxy_mlp.expand(self.n_items, -1),
                     all_mlp_items
-                ], dim=-1)                                                 # (n_items, 2*emb_dim)
-                mlp_out        = self.model.mlp(mlp_in)                   # (n_items, last_dim)
-                combined       = torch.cat([gmf_out, mlp_out], dim=-1)
-                scores         = torch.sigmoid(
+                ], dim=-1)                                                # (n_items, 2*emb_dim)
+                mlp_out   = self.model.mlp(mlp_in)                       # (n_items, last_dim)
+                combined  = torch.cat([gmf_out, mlp_out], dim=-1)
+                scores    = torch.sigmoid(
                     self.model.predict(combined)
                 ).squeeze(-1).cpu().numpy()                               # (n_items,)
 
@@ -342,7 +338,8 @@ class NCFModel(BaseModel):
                     if int(i) not in user_seen
                 ][:k]
                 recommendations[user_idx] = ranked
-            print(f'    [{self.name}] cold-start: {n_embedding} embedding, {n_fallback} popularity fallback '
-                  f'({100*n_fallback/len(user_ids):.0f}% fallback)')
+
+        print(f'    [{self.name}] cold-start: {n_embedding} embedding, {n_fallback} popularity fallback '
+              f'({100*n_fallback/len(user_ids):.0f}% fallback)')
 
         return recommendations
