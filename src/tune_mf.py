@@ -22,15 +22,15 @@ def tune(cfg):
     # tuning grid — keep it manageable
     if cfg.feedback_type == 'explicit':
         param_grid = {
-            'n_factors': [20, 50, 100],
+            'n_factors': [50, 100, 200],
             'reg':       [0.001, 0.01, 0.1],
-            'n_epochs':  [20, 50],
+            'n_epochs':  [30, 50, 100],
         }
     else:
         param_grid = {
-            'n_factors': [50, 100],
-            'reg':       [0.01, 0.1],
-            'n_epochs':  [15, 30],
+            'n_factors': [50, 100, 200],
+            'reg':       [0.001, 0.01, 0.1],
+            'n_epochs':  [30, 50, 100],
             'alpha':     [10, 40, 100],
         }
 

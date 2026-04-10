@@ -21,20 +21,31 @@ def tune(cfg):
     train_df = pd.read_csv(base / 'train.csv')
     val_df   = pd.read_csv(base / 'val.csv')
 
-    if cfg.feedback_type == 'explicit':
-        param_grid = {
-            'emb_dim':      [32, 64],
-            'tower_layers': [[64], [128, 64]],
-            'lr':           [1e-3, 5e-3],
-            'n_neg':        [4, 8],
-        }
-    else:
-        param_grid = {
-            'emb_dim':      [32, 64],
-            'tower_layers': [[64], [128, 64]],
-            'lr':           [1e-3, 5e-3],
-            'n_neg':        [4, 8],
-        }
+    train_df = train_df[
+        (train_df['user_idx'] >= 0) & 
+        (train_df['item_idx'] >= 0)
+    ].copy()
+    val_df = val_df[
+        (val_df['user_idx'] >= 0) & 
+        (val_df['item_idx'] >= 0)
+    ].copy()
+    
+    n_users = train_df['user_idx'].max() + 1
+    n_items = train_df['item_idx'].max() + 1
+
+    # check for out-of-range indices
+    print(f"n_users={n_users}, n_items={n_items}")
+    print(f"val max user_idx: {val_df['user_idx'].max()}")
+    print(f"val max item_idx: {val_df['item_idx'].max()}")
+    print(f"val items out of range: {(val_df['item_idx'] >= n_items).sum()}")
+    print(f"val users out of range: {(val_df['user_idx'] >= n_users).sum()}")
+
+    param_grid = {
+        'emb_dim':      [32, 64, 128],
+        'tower_layers': [[64], [128, 64], [256, 128]],
+        'lr':           [1e-3, 5e-3, 1e-2],
+        'n_neg':        [4, 8, 16],
+    }
 
     keys   = list(param_grid.keys())
     values = list(param_grid.values())
@@ -51,7 +62,7 @@ def tune(cfg):
             tower_layers=params['tower_layers'],
             lr=params['lr'],
             n_neg=params['n_neg'],
-            n_epochs=10,
+            n_epochs=100,
             patience=3,
         )
         model.fit(train_df, val_df)

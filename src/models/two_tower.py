@@ -168,6 +168,14 @@ class TwoTowerModel(BaseModel):
                                     'cuda' if torch.cuda.is_available() else 'cpu')
 
     def fit(self, train_df: pd.DataFrame, val_df: pd.DataFrame) -> None:
+        train_df = train_df[
+            (train_df['user_idx'] >= 0) & 
+            (train_df['item_idx'] >= 0)
+        ].copy()
+        val_df = val_df[
+            (val_df['user_idx'] >= 0) & 
+            (val_df['item_idx'] >= 0)
+        ].copy()
         self.n_users = train_df['user_idx'].max() + 1
         self.n_items = train_df['item_idx'].max() + 1
 
