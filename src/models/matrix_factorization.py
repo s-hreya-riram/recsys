@@ -16,19 +16,19 @@ from config import DatasetConfig
 class MatrixFactorizationModel(BaseModel):
     name = 'matrix_factorization'
 
-    def __init__(self, cfg: DatasetConfig, n_factors=50, reg=0.001, n_epochs=50, alpha=40):
+    def __init__(self, cfg: DatasetConfig):
         self.cfg       = cfg
         if self.cfg.feedback_type == 'explicit':
-            # Best params: {'n_factors': 50, 'reg': 0.001, 'n_epochs': 50}
-            self.n_factors = 50
-            self.reg       = 0.001
-            self.n_epochs  = 50
-        else:
-            # Best params: {'n_factors': 100, 'reg': 0.1, 'n_epochs': 30, 'alpha': 100}
+            # Best params: (n_factors=100, reg=0.1, n_epochs=30)
             self.n_factors = 100
             self.reg       = 0.1
             self.n_epochs  = 30
-            self.alpha     = 100
+        else:
+            # Best params: {'n_factors': 100, 'reg': 0.001, 'n_epochs': 50, 'alpha': 10}
+            self.n_factors = 100
+            self.reg       = 0.001
+            self.n_epochs  = 50
+            self.alpha     = 10
         self.model          = None
         self.user_factors   = None  # shape (n_users, n_factors)
         self.item_factors   = None  # shape (n_items, n_factors)

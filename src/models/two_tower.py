@@ -135,14 +135,23 @@ class TwoTowerModel(BaseModel):
                  n_neg:        int   = 4,
                  lr:           float = 1e-3,
                  batch_size:   int   = 256,
-                 n_epochs:     int   = 10,
-                 patience:     int   = 3):
+                 n_epochs:     int   = 50,
+                 patience:     int   = 5):
 
         self.cfg          = cfg
-        self.emb_dim      = emb_dim
-        self.tower_layers = tower_layers or [64]
-        self.n_neg        = n_neg
-        self.lr           = lr
+        if cfg.feedback_type == 'explicit':
+            # Best params: (32,[64],0.001,8)
+            self.emb_dim = 32
+            self.tower_layers = [64]
+            self.n_neg = 8
+            self.lr = 0.001
+        else:
+            # use inputs for implicit feedback
+            self.emb_dim      = emb_dim
+            self.tower_layers = tower_layers or [64]
+            self.n_neg        = n_neg
+            self.lr           = lr
+        
         self.batch_size   = batch_size
         self.n_epochs     = n_epochs
         self.patience     = patience  # early stopping patience (epochs, based on val NDCG@10)
