@@ -57,8 +57,6 @@ class TwoTowerDataset(Dataset):
         self.users   = df['user_idx'].values
         self.items   = df['item_idx'].values
 
-        # use global_seen if provided (avoids train items being sampled as
-        # negatives when computing val loss), otherwise fall back to df
         if global_seen is not None:
             self.user_positives = global_seen
         else:
@@ -95,10 +93,7 @@ class TwoTowerArchitecture(nn.Module):
         self.user_emb = nn.Embedding(n_users, emb_dim)
         self.item_emb = nn.Embedding(n_items, emb_dim)
 
-        # user tower — MLP on top of user embedding
         self.user_tower = self._build_tower(emb_dim, tower_layers)
-
-        # item tower — same architecture, separate weights
         self.item_tower = self._build_tower(emb_dim, tower_layers)
 
         self._init_weights()
@@ -143,23 +138,14 @@ class TwoTowerModel(BaseModel):
                  n_epochs:     int   = 10,
                  patience:     int   = 3):
 
-        self.cfg = cfg
-        if self.cfg.feedback_type != 'implicit':
-            # Best params: {'emb_dim': 64, 'tower_layers': [128, 64], 'lr': 0.001, 'n_neg': 4}
-            self.emb_dim      = 64
-            self.tower_layers = [128, 64]
-            self.lr           = 0.001
-            self.n_neg        = 4
-        else:
-            # Best params: {'emb_dim': 64, 'tower_layers': [128, 64], 'lr': 0.005, 'n_neg': 8}
-            self.emb_dim      = 64
-            self.tower_layers = [128, 64]
-            self.lr           = 0.005
-            self.n_neg        = 8
-
-        self.batch_size = batch_size
-        self.n_epochs = n_epochs
-        self.patience   = patience
+        self.cfg          = cfg
+        self.emb_dim      = emb_dim
+        self.tower_layers = tower_layers or [64]
+        self.n_neg        = n_neg
+        self.lr           = lr
+        self.batch_size   = batch_size
+        self.n_epochs     = n_epochs
+        self.patience     = patience  # early stopping patience (epochs, based on val NDCG@10)
 
         self.model   = None
         self.n_users = None
@@ -168,14 +154,17 @@ class TwoTowerModel(BaseModel):
                                     'cuda' if torch.cuda.is_available() else 'cpu')
 
     def fit(self, train_df: pd.DataFrame, val_df: pd.DataFrame) -> None:
+        from evaluate import evaluate_model
+
         train_df = train_df[
-            (train_df['user_idx'] >= 0) & 
+            (train_df['user_idx'] >= 0) &
             (train_df['item_idx'] >= 0)
         ].copy()
         val_df = val_df[
-            (val_df['user_idx'] >= 0) & 
+            (val_df['user_idx'] >= 0) &
             (val_df['item_idx'] >= 0)
         ].copy()
+
         self.n_users = train_df['user_idx'].max() + 1
         self.n_items = train_df['item_idx'].max() + 1
 
@@ -187,26 +176,23 @@ class TwoTowerModel(BaseModel):
             self.n_users, self.n_items, self.emb_dim, self.tower_layers
         ).to(self.device)
 
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
 
         # build global seen dict — val negatives must exclude train positives too
-        train_seen = train_df.groupby('user_idx')['item_idx'].apply(set).to_dict()
-        val_seen   = val_df.groupby('user_idx')['item_idx'].apply(set).to_dict()
+        train_seen  = train_df.groupby('user_idx')['item_idx'].apply(set).to_dict()
+        val_seen    = val_df.groupby('user_idx')['item_idx'].apply(set).to_dict()
         global_seen = {
             u: train_seen.get(u, set()) | val_seen.get(u, set())
             for u in set(train_seen) | set(val_seen)
         }
 
         train_dataset = TwoTowerDataset(train_df, self.n_items, self.n_neg)
-        val_dataset   = TwoTowerDataset(val_df,   self.n_items, self.n_neg,
-                                        global_seen=global_seen)
+        train_loader  = DataLoader(train_dataset, batch_size=self.batch_size,
+                                   shuffle=True, num_workers=0)
 
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size,
-                                  shuffle=True,  num_workers=0)
-        val_loader   = DataLoader(val_dataset,   batch_size=self.batch_size,
-                                  shuffle=False, num_workers=0)
+        val_user_ids  = val_df['user_idx'].unique().tolist()
 
-        best_val_loss  = float('inf')
+        best_val_ndcg  = -1.0
         patience_count = 0
         best_weights   = None
 
@@ -227,25 +213,22 @@ class TwoTowerModel(BaseModel):
                 optimizer.step()
                 train_loss += loss.item()
 
-            # --- val ---
-            self.model.eval()
-            val_loss = 0.0
-            with torch.no_grad():
-                for users, pos_items, neg_items in val_loader:
-                    users     = users.to(self.device)
-                    pos_items = pos_items.to(self.device)
-                    neg_items = neg_items.to(self.device)
-                    pos_scores = self.model(users, pos_items)
-                    neg_scores = self.model(users, neg_items)
-                    val_loss  += bpr_loss(pos_scores, neg_scores).item()
-
             avg_train = train_loss / len(train_loader)
-            avg_val   = val_loss   / len(val_loader)
-            print(f'      epoch {epoch+1}/{self.n_epochs} '
-                  f'train_loss={avg_train:.4f} val_loss={avg_val:.4f}')
 
-            if avg_val < best_val_loss:
-                best_val_loss  = avg_val
+            # --- val: evaluate ranking quality directly ---
+            # BPR val loss can be a misleading early stopping signal — ranking
+            # quality (NDCG@10) directly measures what we care about.
+            # Two-tower precomputes item vectors once, so this is efficient.
+            self.model.eval()
+            val_recs    = self.recommend(val_user_ids, train_df, k=10)
+            val_metrics = evaluate_model(val_recs, val_df, k=10)
+            val_ndcg    = val_metrics['NDCG@10']
+
+            print(f'      epoch {epoch+1}/{self.n_epochs} '
+                  f'train_loss={avg_train:.4f} val_NDCG@10={val_ndcg:.4f}')
+
+            if val_ndcg > best_val_ndcg:
+                best_val_ndcg  = val_ndcg
                 patience_count = 0
                 best_weights   = {k: v.clone() for k, v in self.model.state_dict().items()}
             else:
@@ -255,7 +238,7 @@ class TwoTowerModel(BaseModel):
                     break
 
         self.model.load_state_dict(best_weights)
-        print(f'      best val loss: {best_val_loss:.4f}')
+        print(f'      best val NDCG@10: {best_val_ndcg:.4f}')
 
     def recommend(self, user_ids: list, train_df: pd.DataFrame, k: int = 10) -> dict[int, list[int]]:
         self.model.eval()
@@ -287,8 +270,6 @@ class TwoTowerModel(BaseModel):
                     self.model.user_emb(user_id_t)
                 )  # (1, out_dim)
 
-                # dot product with all items — no sigmoid needed at inference,
-                # ranking order is preserved with raw scores
                 scores = (all_item_vecs * user_vec).sum(dim=-1).cpu().numpy()
 
                 ranked = [
@@ -299,9 +280,9 @@ class TwoTowerModel(BaseModel):
                 recommendations[user_idx] = ranked
 
         return recommendations
-    
+
     def recommend_cold_start(self, user_ids: list, context_df: pd.DataFrame,
-                         train_df: pd.DataFrame, k: int = 10) -> dict[int, list[int]]:
+                             train_df: pd.DataFrame, k: int = 10) -> dict[int, list[int]]:
         self.model.eval()
 
         popular_items = (
@@ -315,7 +296,6 @@ class TwoTowerModel(BaseModel):
             .apply(list).to_dict()
         )
 
-        # precompute all item vectors once
         all_item_ids = torch.arange(self.n_items).to(self.device)
         with torch.no_grad():
             all_item_vecs = self.model.item_tower(
@@ -323,13 +303,13 @@ class TwoTowerModel(BaseModel):
             )  # (n_items, out_dim)
 
         recommendations = {}
-        n_fallback = 0
+        n_fallback  = 0
         n_embedding = 0
+
         with torch.no_grad():
             for user_idx in user_ids:
                 context_items = user_context.get(user_idx, [])
                 user_seen     = set(context_items)
-
 
                 if not context_items:
                     n_fallback += 1
@@ -337,16 +317,17 @@ class TwoTowerModel(BaseModel):
                         i for i in popular_items if i not in user_seen
                     ][:k]
                     continue
+
                 n_embedding += 1
                 context_tensor = torch.tensor(context_items).to(self.device)
 
                 # average item tower outputs as proxy user vector
-                # this uses the full item tower (embedding + MLP), not just embeddings
+                # uses the full item tower (embedding + MLP), not just raw embeddings,
                 # giving a richer representation than raw embeddings alone
                 item_vecs  = self.model.item_tower(
                     self.model.item_emb(context_tensor)
-                )                                           # (n_context, out_dim)
-                user_proxy = item_vecs.mean(dim=0, keepdim=True)  # (1, out_dim)
+                )                                                 # (n_context, out_dim)
+                user_proxy = item_vecs.mean(dim=0, keepdim=True) # (1, out_dim)
 
                 scores = (all_item_vecs * user_proxy).sum(dim=-1).cpu().numpy()
 
@@ -355,7 +336,8 @@ class TwoTowerModel(BaseModel):
                     if int(i) not in user_seen
                 ][:k]
                 recommendations[user_idx] = ranked
-            print(f'    [{self.name}] cold-start: {n_embedding} embedding, {n_fallback} popularity fallback '
-                      f'({100*n_fallback/len(user_ids):.0f}% fallback)')
+
+        print(f'    [{self.name}] cold-start: {n_embedding} embedding, {n_fallback} popularity fallback '
+              f'({100*n_fallback/len(user_ids):.0f}% fallback)')
 
         return recommendations

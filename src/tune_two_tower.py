@@ -1,5 +1,6 @@
 '''
 Hyperparameter tuning for Two-Tower model using val set.
+Run: python src/tune_two_tower.py --dataset movielens
 '''
 
 import pandas as pd
@@ -22,18 +23,17 @@ def tune(cfg):
     val_df   = pd.read_csv(base / 'val.csv')
 
     train_df = train_df[
-        (train_df['user_idx'] >= 0) & 
+        (train_df['user_idx'] >= 0) &
         (train_df['item_idx'] >= 0)
     ].copy()
     val_df = val_df[
-        (val_df['user_idx'] >= 0) & 
+        (val_df['user_idx'] >= 0) &
         (val_df['item_idx'] >= 0)
     ].copy()
-    
+
     n_users = train_df['user_idx'].max() + 1
     n_items = train_df['item_idx'].max() + 1
 
-    # check for out-of-range indices
     print(f"n_users={n_users}, n_items={n_items}")
     print(f"val max user_idx: {val_df['user_idx'].max()}")
     print(f"val max item_idx: {val_df['item_idx'].max()}")
@@ -67,6 +67,8 @@ def tune(cfg):
         )
         model.fit(train_df, val_df)
 
+        # model.fit already restores the best checkpoint via NDCG-based early
+        # stopping, so recommend() here reflects the best epoch, not the last
         user_ids = val_df['user_idx'].unique().tolist()
         recs     = model.recommend(user_ids, train_df, k=10)
         metrics  = evaluate_model(recs, val_df, k=10)
@@ -102,6 +104,6 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', choices=['movielens', 'amazonmusic'], required=True)
-    args = parser.parse_args()
+    args   = parser.parse_args()
     cfg    = MOVIELENS_CFG if args.dataset == 'movielens' else AMAZON_CFG
-    best   = tune(cfg)
+    tune(cfg)

@@ -123,28 +123,16 @@ class NCFArchitecture(nn.Module):
 class NCFModel(BaseModel):
     name = 'ncf'
 
-    def __init__(self, cfg: DatasetConfig,
-                 emb_dim:    int  = 32,
-                 mlp_layers: list = None,
-                 n_neg:      int  = 4,
-                 lr:         float = 1e-3,
-                 batch_size: int  = 256,
-                 n_epochs:   int  = 20,
-                 patience:   int  = 3):
-
+    def __init__(self, cfg, emb_dim=32, mlp_layers=None, n_neg=4,
+             lr=1e-3, batch_size=256, n_epochs=20, patience=3):
         self.cfg        = cfg
-        if self.cfg.feedback_type == 'explicit':
-            # Best params: {'emb_dim': 32, 'mlp_layers': [64, 32, 16], 'lr': 0.005, 'n_neg': 4}
-            self.emb_dim    = 32
-            self.mlp_layers = [64, 32, 16]
-            self.n_neg      = 4
-            self.lr         = 0.005
-        else:
-            # Best params: {'emb_dim': 64, 'mlp_layers': [64, 32, 16], 'lr': 0.001, 'n_neg': 4}
-            self.emb_dim    = 64
-            self.mlp_layers = [64, 32, 16]
-            self.n_neg      = 4
-            self.lr         = 0.001
+        self.emb_dim    = emb_dim
+        self.mlp_layers = mlp_layers or [64, 32, 16]
+        self.n_neg      = n_neg
+        self.lr         = lr
+        self.batch_size = batch_size
+        self.n_epochs   = n_epochs
+        self.patience   = patience
 
         self.batch_size = batch_size
         self.n_epochs   = n_epochs
