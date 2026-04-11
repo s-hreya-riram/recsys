@@ -135,10 +135,11 @@ class NCFModel(BaseModel):
             self.lr         = 1e-3
         else:
             # use input params for implicit feedback since we don't have a strong baseline for it
-            self.emb_dim    = emb_dim
+            # Best params found in tuning: {64,[128, 64, 32],0.001,4}
+            self.emb_dim    = emb_dim or 64
             self.mlp_layers = mlp_layers or [128, 64, 32]
-            self.n_neg      = n_neg
-            self.lr         = lr
+            self.n_neg      = n_neg or 4
+            self.lr         = lr or 0.001
 
         self.batch_size = batch_size
         self.n_epochs   = n_epochs
