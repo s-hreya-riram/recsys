@@ -66,6 +66,7 @@ def run_pipeline(cfg, skip_preprocess=False):
         train_df, val_df, test_df, cold_start_df, user_map, item_map = encode_ids(
             train_df, val_df, test_df, cold_start_df
         )
+        
         write_splits(train_df, val_df, test_df, cold_start_df,
                      output_dir=OUTPUT_DIRS[cfg.name])
     else:
@@ -73,6 +74,13 @@ def run_pipeline(cfg, skip_preprocess=False):
 
     # Load splits
     train_df, val_df, test_df, cold_start_df = load_splits(cfg)
+
+    # Always print these regardless of skip_preprocess
+    print(f"test_df item_idx range: {test_df['item_idx'].min()} to {test_df['item_idx'].max()}")
+    print(f"test_df user_idx unique count: {test_df['user_idx'].nunique()}")
+    print(f"relevant items in test: {(test_df['relevant']==1).sum()}")
+    print(f"total items in test: {len(test_df)}")
+    print(f"relevance rate: {(test_df['relevant']==1).mean():.2%}")
 
     cold_start_context_df, cold_start_test_df = split_cold_start(cold_start_df, context_size=3)
 
@@ -83,6 +91,9 @@ def run_pipeline(cfg, skip_preprocess=False):
 
     # Separate user ID lists up front — no mixing between evaluation sets
     regular_user_ids    = test_df['user_idx'].unique().tolist()
+    print(f"Sample regular_user_ids: {regular_user_ids[:5]}")
+    print(f"Sample test_df user_idx: {test_df['user_idx'].unique()[:5]}")
+    print(f"Do they overlap: {set(regular_user_ids[:5]) & set(test_df['user_idx'].unique()[:5])}")
 
     print(f"\n Unique regular user IDs in test set:  {len(regular_user_ids)}")
     print(f" Unique cold-start user IDs:           {len(cold_start_user_ids)}")
@@ -110,6 +121,7 @@ def run_pipeline(cfg, skip_preprocess=False):
         print(f'  training time: {train_time:.4f}s')
 
         eval_start     = time.time()
+        print(f"  train_df item_idx sample before recommend: {train_df[train_df['user_idx']==0]['item_idx'].tolist()[:5]}")
         regular_recs   = model.recommend(regular_user_ids, train_df, k=10)
         cold_start_recs = model.recommend_cold_start(
             cold_start_user_ids, cold_start_context_df, train_df, k=10
@@ -132,6 +144,27 @@ def run_pipeline(cfg, skip_preprocess=False):
 
         for split, metrics in results.items():
             print(f'    {split}: { {k: round(v, 4) for k, v in metrics.items()} }')
+        
+        if model.name == 'matrix_factorization':
+            sample_user = regular_user_ids[0]
+            print(f"  [MF debug] Recs for user {sample_user}: {regular_recs.get(sample_user, [])}")
+            print(f"  [MF debug] Test items for user {sample_user}: {test_df[test_df['user_idx']==sample_user]['item_idx'].tolist()}")
+            print(f"  [MF debug] Relevant test items: {test_df[(test_df['user_idx']==sample_user) & (test_df['relevant']==1)]['item_idx'].tolist()}")
+            train_items = set(train_df['item_idx'].unique())
+            test_relevant = test_df[test_df['relevant']==1]['item_idx']
+            print(f"Relevant test items in train: {test_relevant.isin(train_items).sum()} / {len(test_relevant)}")
+
+            # And for user 0 specifically
+            user0_relevant = set([573, 610, 922, 883, 1139, 303, 254, 569, 792, 360, 
+                                1764, 2001, 2081, 404, 1296, 2462, 3463, 4017, 240, 1338, 807, 2179])
+            print(f"User 0 relevant items in train: {len(user0_relevant & train_items)} / {len(user0_relevant)}")
+
+            # What do popular items look like vs what MF recommends?
+            popular_items = train_df.groupby('item_idx').size().sort_values(ascending=False).head(20).index.tolist()
+            mf_recs_user0 = [713, 1741, 684, 247, 2511, 1031, 797, 4157, 2678, 655]
+            print(f"Popular items: {popular_items}")
+            print(f"MF recs overlap with popular: {len(set(mf_recs_user0) & set(popular_items))}")
+
 
     write_results(all_results, cfg)
     print('\n Completed execution of the pipeline for the chosen dataset')

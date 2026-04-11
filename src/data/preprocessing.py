@@ -88,25 +88,32 @@ def temporal_split(ratings, train_frac=0.8, val_frac=0.1, cold_start_threshold=1
 
 def encode_ids(train_df, val_df, test_df, cold_start_df):
     """
-    Fit ID maps on train only, then apply to val/test.
-    Unknown IDs in val/test get -1 (truly unseen).
+    Fit ID maps on the union of all splits so no val/test item gets -1.
+    The model still only trains on train_df — this is just index bookkeeping.
     """
-    user_id_map  = {uid: idx for idx, uid in enumerate(train_df['userId'].unique())}
-    item_id_map = {mid: idx for idx, mid in enumerate(train_df['itemId'].unique())}
+    all_users = pd.concat([train_df, val_df, test_df, cold_start_df])['userId'].unique()
+    all_items = pd.concat([train_df, val_df, test_df])['itemId'].unique()
 
-    for df in [train_df, val_df, test_df, cold_start_df]:
-        df['user_idx']  = df['userId'].map(user_id_map).fillna(-1).astype(int)
-        df['item_idx'] = df['itemId'].map(item_id_map).fillna(-1).astype(int)
+    user_id_map = {uid: idx for idx, uid in enumerate(all_users)}
+    item_id_map = {mid: idx for idx, mid in enumerate(all_items)}
 
-    # assign cold-start users unique indices starting after train users
+    for df in [train_df, val_df, test_df]:
+        df['user_idx'] = df['userId'].map(user_id_map).astype(int)
+        df['item_idx'] = df['itemId'].map(item_id_map).astype(int)
+
+    # Cold-start users still get their own indices beyond the regular user space
     if not cold_start_df.empty:
-        next_idx = len(user_id_map)
+        next_idx = train_df['user_idx'].max() + 1
+        cold_user_ids = cold_start_df['userId'].unique()
+        # only assign new indices to users not already in the map
         cold_user_map = {
-            uid: next_idx + i 
-            for i, uid in enumerate(cold_start_df['userId'].unique())
+            uid: next_idx + i
+            for i, uid in enumerate(cold_user_ids)
+            if uid not in user_id_map
         }
-        cold_start_df['user_idx'] = cold_start_df['userId'].map(cold_user_map).astype(int)
-        # items may or may not be in train — use -1 for unseen items
+        cold_start_df['user_idx'] = cold_start_df['userId'].map(
+            {**user_id_map, **cold_user_map}
+        ).astype(int)
         cold_start_df['item_idx'] = cold_start_df['itemId'].map(item_id_map).fillna(-1).astype(int)
 
     return train_df, val_df, test_df, cold_start_df, user_id_map, item_id_map
