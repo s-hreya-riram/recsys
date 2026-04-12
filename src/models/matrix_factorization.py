@@ -41,6 +41,7 @@ class MatrixFactorizationModel(BaseModel):
         self.user_factors = None   # (n_users, n_factors)
         self.item_factors = None   # (n_items, n_factors)
         self.n_items      = None
+        self.n_items_train = None  # width of matrix passed to ALS fit — needed for recalculate_user
 
     # ------------------------------------------------------------------
     # Fit
@@ -96,7 +97,8 @@ class MatrixFactorizationModel(BaseModel):
 
         n_users = train_df['user_idx'].max() + 1
         n_items = train_df['item_idx'].max() + 1
-        self.n_items = n_items
+        self.n_items       = n_items
+        self.n_items_train = n_items  # recalculate_user requires matrix width == training width
 
         train_agg = train_df.groupby(['user_idx', 'item_idx']).size().reset_index(name='count')
         user_item = csr_matrix(
@@ -128,7 +130,7 @@ class MatrixFactorizationModel(BaseModel):
     def _recommend_svd(
         self, user_ids: list, train_df: pd.DataFrame, k: int
     ) -> dict[int, list[int]]:
-        # Now identical in structure to _recommend_als — no Surprise inner ID
+        # Identical in structure to _recommend_als — no Surprise inner ID
         # lookups needed since _fit_svd already mapped factors to raw indices.
         seen_items = {u: set(g) for u, g in train_df.groupby('user_idx')['item_idx']}
 
@@ -148,21 +150,6 @@ class MatrixFactorizationModel(BaseModel):
                 int(i) for i in np.argsort(scores)[::-1]
                 if int(i) not in user_seen
             ][:k]
-
-            if user_idx == 0:
-                print(f"User 0 seen items count: {len(user_seen)}")
-                print(f"User 0 seen items sample: {list(user_seen)[:20]}")
-                print(f"Popular items in seen: {[i for i in [15,357,170,77,303,47,109,85,368,145] if i in user_seen]}")
-                print(f"Score for item 303: {scores[303]:.4f}")
-                print(f"Score for item 15 (most popular): {scores[15]:.4f}")
-                print(f"Score for item 713 (top rec): {scores[713]:.4f}")
-                print(f"Top 20 scored items: {np.argsort(scores)[::-1][:20].tolist()}")
-
-                user0_relevant_test = {573,610,922,883,1139,303,254,569,792,360,1764,2001,2081,
-                                    404,1296,2462,3463,4017,240,1338,807,2179}
-                unseen_relevant = user0_relevant_test - user_seen
-                print(f"Relevant test items NOT in user 0 train: {unseen_relevant}")
-                print(f"Scores for those items: { {i: round(float(scores[i]),3) for i in unseen_relevant} }")
 
         return recommendations
 
@@ -218,7 +205,12 @@ class MatrixFactorizationModel(BaseModel):
     ) -> dict[int, list[int]]:
         from scipy.sparse import csr_matrix
 
-        n_items = train_df['item_idx'].max() + 1
+        # n_items_full: wide enough to hold any context item index without crashing.
+        # n_items_train: what recalculate_user expects (must match training matrix width).
+        # Context items beyond n_items_train have no learnt factors, so trimming is lossless.
+        max_context_item  = context_df['item_idx'].replace(-1, 0).max()
+        n_items_full  = max(self.n_items, int(max_context_item) + 1)
+        n_items_train = self.n_items_train
 
         popular_items: list[int] = (
             train_df.groupby('item_idx').size()
@@ -247,12 +239,16 @@ class MatrixFactorizationModel(BaseModel):
             n_embedding += 1
             data = np.ones(len(context_items))
             cols = np.array(context_items)
+
+            # Build full-width matrix first (avoids index overflow on unseen items),
+            # then trim to train width before passing to recalculate_user.
             user_interactions = csr_matrix(
                 (data, (np.zeros(len(context_items), dtype=int), cols)),
-                shape=(1, n_items),
+                shape=(1, n_items_full),
             ) * self.alpha
+            user_interactions_trimmed = user_interactions[:, :n_items_train]
 
-            user_vec = self.model.recalculate_user(0, user_interactions)
+            user_vec = self.model.recalculate_user(0, user_interactions_trimmed)
             scores   = self.item_factors @ user_vec
 
             recommendations[user_idx] = [

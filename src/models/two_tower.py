@@ -146,12 +146,12 @@ class TwoTowerModel(BaseModel):
             self.n_neg = 8
             self.lr = 0.001
         else:
-            # use inputs for implicit feedback
-            self.emb_dim      = emb_dim
+            # Best params: {'emb_dim': 64, 'tower_layers': [64], 'lr': 0.001, 'n_neg': 8}
+            self.emb_dim      = emb_dim or 64
             self.tower_layers = tower_layers or [64]
-            self.n_neg        = n_neg
-            self.lr           = lr
-        
+            self.n_neg        = n_neg or 8
+            self.lr           = lr or 0.001
+
         self.batch_size   = batch_size
         self.n_epochs     = n_epochs
         self.patience     = patience  # early stopping patience (epochs, based on val NDCG@10)
