@@ -147,10 +147,10 @@ class TwoTowerModel(BaseModel):
             self.lr = 0.001
         else:
             # Best params: {'emb_dim': 64, 'tower_layers': [64], 'lr': 0.001, 'n_neg': 8}
-            self.emb_dim      = emb_dim or 64
-            self.tower_layers = tower_layers or [64]
-            self.n_neg        = n_neg or 8
-            self.lr           = lr or 0.001
+            self.emb_dim      = 64
+            self.tower_layers = [64]
+            self.n_neg        = 8
+            self.lr           = 0.001
 
         self.batch_size   = batch_size
         self.n_epochs     = n_epochs

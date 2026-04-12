@@ -32,6 +32,7 @@ class MatrixFactorizationModel(BaseModel):
             self.n_epochs  = n_epochs  if n_epochs  is not None else 300
             self.alpha     = None
         else:
+            # 200,0.01,30,100,0.10109289617486339,0.05674587816501464,0.044720320931094786
             self.n_factors = n_factors if n_factors is not None else 200
             self.reg       = reg       if reg       is not None else 0.01
             self.n_epochs  = n_epochs  if n_epochs  is not None else 30
