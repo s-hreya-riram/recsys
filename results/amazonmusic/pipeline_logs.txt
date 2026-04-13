@@ -1,0 +1,116 @@
+(.venv) shreyasriram@Shreyas-MacBook-Air-2 recsys % python src/pipeline.py --dataset amazonmusic
+
+==================================================
+Dataset: amazonmusic (implicit)
+==================================================
+
+ Executing step 1: preprocessing...
+Train: 124,807 | Val: 20,812 | Test: 23,622
+Cold-start users: 89
+Cold-start split: 64 users with context, 25 skipped (too few interactions)
+Sample regular_user_ids: [0, 1, 2, 3, 4]
+Sample test_df user_idx: [0 1 2 3 4]
+Do they overlap: {0, 1, 2, 3, 4}
+
+ Unique regular user IDs in test set:  16470
+ Unique cold-start user IDs:           64
+
+ Executing step 2: training and evaluating models
+
+  Fitting popularity...
+  training time: 0.0024s
+    [popularity] cold-start fallback: 64/64 users used popularity
+  eval time: 0.1198s
+Regular users evaluated: 16470
+Cold-start interactions: 64
+Total recommendations generated: 16534
+    regular: {'HR@10': 0.0151, 'NDCG@10': 0.0076, 'MAP': 0.0058}
+    cold_start: {'HR@10': 0.0312, 'NDCG@10': 0.0224, 'MAP': 0.0195}
+
+  Fitting matrix_factorization...
+    training ALS: factors=200, reg=0.01, iterations=30, alpha=100
+/Users/shreyasriram/course_projects/recommender_systems_dl_replica/recsys/.venv/lib/python3.12/site-packages/implicit/cpu/als.py:95: RuntimeWarning: OpenBLAS is configured to use 8 threads. It is highly recommended to disable its internal threadpool by setting the environment variable 'OPENBLAS_NUM_THREADS=1' or by calling 'threadpoolctl.threadpool_limits(1, "blas")'. Having OpenBLAS use a threadpool can lead to severe performance issues here.
+  check_blas_config()
+100%|█████████████████████████████████████████████████████████████████████| 30/30 [00:24<00:00,  1.23it/s, loss=0.0064]
+  training time: 24.4871s
+    [matrix_factorization] cold-start: 64 embedding, 0 popularity fallback (0% fallback)
+  eval time: 45.9636s
+Regular users evaluated: 16470
+Cold-start interactions: 64
+Total recommendations generated: 16534
+    regular: {'HR@10': 0.0807, 'NDCG@10': 0.0397, 'MAP': 0.0296}
+    cold_start: {'HR@10': 0.0938, 'NDCG@10': 0.0619, 'MAP': 0.0517}
+
+  Fitting ncf...
+    NCF training on mps: emb=64, layers=[128, 64, 32], neg=4, lr=0.001
+      epoch 1/50 train_loss=0.4595 val_NDCG@10=0.0065
+      epoch 2/50 train_loss=0.4341 val_NDCG@10=0.0072
+      epoch 3/50 train_loss=0.4154 val_NDCG@10=0.0086
+      epoch 4/50 train_loss=0.3858 val_NDCG@10=0.0088
+      epoch 5/50 train_loss=0.3542 val_NDCG@10=0.0094
+      epoch 6/50 train_loss=0.3265 val_NDCG@10=0.0099
+      epoch 7/50 train_loss=0.3023 val_NDCG@10=0.0099
+      epoch 8/50 train_loss=0.2809 val_NDCG@10=0.0097
+      epoch 9/50 train_loss=0.2620 val_NDCG@10=0.0082
+      epoch 10/50 train_loss=0.2455 val_NDCG@10=0.0107
+      epoch 11/50 train_loss=0.2296 val_NDCG@10=0.0098
+      epoch 12/50 train_loss=0.2162 val_NDCG@10=0.0097
+      epoch 13/50 train_loss=0.2051 val_NDCG@10=0.0086
+      epoch 14/50 train_loss=0.1940 val_NDCG@10=0.0101
+      epoch 15/50 train_loss=0.1849 val_NDCG@10=0.0106
+      early stopping at epoch 15
+      best val NDCG@10: 0.0107
+  training time: 1488.5948s
+    [ncf] cold-start: 64 embedding, 0 popularity fallback (0% fallback)
+  eval time: 79.0003s
+Regular users evaluated: 16470
+Cold-start interactions: 64
+Total recommendations generated: 16534
+    regular: {'HR@10': 0.0212, 'NDCG@10': 0.0088, 'MAP': 0.0059}
+    cold_start: {'HR@10': 0.0156, 'NDCG@10': 0.0156, 'MAP': 0.0156}
+
+  Fitting two_tower...
+    two-tower [implicit] on mps: emb=64, layers=[64], neg=8, lr=0.001
+      epoch 1/50 train_loss=0.4969 val_NDCG@10=0.0059
+      epoch 2/50 train_loss=0.3719 val_NDCG@10=0.0065
+      epoch 3/50 train_loss=0.2901 val_NDCG@10=0.0064
+      epoch 4/50 train_loss=0.2449 val_NDCG@10=0.0081
+      epoch 5/50 train_loss=0.2179 val_NDCG@10=0.0093
+      epoch 6/50 train_loss=0.2033 val_NDCG@10=0.0106
+      epoch 7/50 train_loss=0.1902 val_NDCG@10=0.0123
+      epoch 8/50 train_loss=0.1796 val_NDCG@10=0.0117
+      epoch 9/50 train_loss=0.1720 val_NDCG@10=0.0121
+      epoch 10/50 train_loss=0.1660 val_NDCG@10=0.0136
+      epoch 11/50 train_loss=0.1620 val_NDCG@10=0.0129
+      epoch 12/50 train_loss=0.1577 val_NDCG@10=0.0138
+      epoch 13/50 train_loss=0.1533 val_NDCG@10=0.0139
+      epoch 14/50 train_loss=0.1507 val_NDCG@10=0.0143
+      epoch 15/50 train_loss=0.1474 val_NDCG@10=0.0160
+      epoch 16/50 train_loss=0.1460 val_NDCG@10=0.0150
+      epoch 17/50 train_loss=0.1435 val_NDCG@10=0.0157
+      epoch 18/50 train_loss=0.1407 val_NDCG@10=0.0161
+      epoch 19/50 train_loss=0.1391 val_NDCG@10=0.0157
+      epoch 20/50 train_loss=0.1381 val_NDCG@10=0.0155
+      epoch 21/50 train_loss=0.1365 val_NDCG@10=0.0163
+      epoch 22/50 train_loss=0.1350 val_NDCG@10=0.0159
+      epoch 23/50 train_loss=0.1336 val_NDCG@10=0.0158
+      epoch 24/50 train_loss=0.1332 val_NDCG@10=0.0159
+      epoch 25/50 train_loss=0.1327 val_NDCG@10=0.0156
+      epoch 26/50 train_loss=0.1310 val_NDCG@10=0.0160
+      early stopping at epoch 26
+      best val NDCG@10: 0.0163
+  training time: 1957.6962s
+    [two_tower] cold-start: 64 embedding, 0 popularity fallback (0% fallback)
+  eval time: 42.3255s
+Regular users evaluated: 16470
+Cold-start interactions: 64
+Total recommendations generated: 16534
+    regular: {'HR@10': 0.0315, 'NDCG@10': 0.0138, 'MAP': 0.0094}
+    cold_start: {'HR@10': 0.0625, 'NDCG@10': 0.0314, 'MAP': 0.0215}
+
+Results saved to results/amazonmusic/metrics.csv
+               model  train_time_s  eval_time_s  regular_HR@10  regular_NDCG@10  regular_MAP  cold_start_HR@10  cold_start_NDCG@10  cold_start_MAP
+          popularity        0.0024       0.1198         0.0151           0.0076       0.0058            0.0312              0.0224          0.0195
+matrix_factorization       24.4871      45.9636         0.0807           0.0397       0.0296            0.0938              0.0619          0.0517
+                 ncf     1488.5948      79.0003         0.0212           0.0088       0.0059            0.0156              0.0156          0.0156
+           two_tower     1957.6962      42.3255         0.0315           0.0138       0.0094            0.0625              0.0314          0.0215

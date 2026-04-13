@@ -1,0 +1,108 @@
+==================================================
+Dataset: movielens (explicit)
+==================================================
+
+ Executing step 1: preprocessing...
+Train: 77,464 | Val: 9,696 | Test: 9,904
+Cold-start users: 145
+Cold-start split: 145 users with context, 0 skipped (too few interactions)
+Sample regular_user_ids: [0, 1, 2, 3, 4]
+Sample test_df user_idx: [0 1 2 3 4]
+Do they overlap: {0, 1, 2, 3, 4}
+
+ Unique regular user IDs in test set:  465
+ Unique cold-start user IDs:           145
+
+ Executing step 2: training and evaluating models
+
+  Fitting popularity...
+  training time: 0.0015s
+    [popularity] cold-start fallback: 145/145 users used popularity
+  eval time: 0.0361s
+Regular users evaluated: 465
+Cold-start interactions: 3337
+Total recommendations generated: 610
+    regular: {'HR@10': 0.1828, 'NDCG@10': 0.0366, 'MAP': 0.0136}
+    cold_start: {'HR@10': 0.531, 'NDCG@10': 0.1343, 'MAP': 0.048}
+
+  Fitting matrix_factorization...
+    training SVD: factors=50, reg=0.001, epochs=300
+  training time: 2.8637s
+    [matrix_factorization] cold-start fallback: 145/145 users used popularity
+  eval time: 1.1305s
+Regular users evaluated: 465
+Cold-start interactions: 3337
+Total recommendations generated: 610
+    regular: {'HR@10': 0.086, 'NDCG@10': 0.0152, 'MAP': 0.0051}
+    cold_start: {'HR@10': 0.531, 'NDCG@10': 0.1343, 'MAP': 0.048}
+
+  Fitting ncf...
+    NCF training on mps: emb=32, layers=[128, 64, 32], neg=8, lr=0.001
+      epoch 1/50 train_loss=0.2647 val_NDCG@10=0.0481
+      epoch 2/50 train_loss=0.2444 val_NDCG@10=0.0490
+      epoch 3/50 train_loss=0.2380 val_NDCG@10=0.0534
+      epoch 4/50 train_loss=0.2249 val_NDCG@10=0.0551
+      epoch 5/50 train_loss=0.2044 val_NDCG@10=0.0531
+      epoch 6/50 train_loss=0.1922 val_NDCG@10=0.0535
+      epoch 7/50 train_loss=0.1819 val_NDCG@10=0.0540
+      epoch 8/50 train_loss=0.1719 val_NDCG@10=0.0585
+      epoch 9/50 train_loss=0.1642 val_NDCG@10=0.0576
+      epoch 10/50 train_loss=0.1569 val_NDCG@10=0.0571
+      epoch 11/50 train_loss=0.1524 val_NDCG@10=0.0581
+      epoch 12/50 train_loss=0.1478 val_NDCG@10=0.0557
+      epoch 13/50 train_loss=0.1436 val_NDCG@10=0.0556
+      early stopping at epoch 13
+      best val NDCG@10: 0.0585
+  training time: 210.4869s
+    [ncf] cold-start: 145 embedding, 0 popularity fallback (0% fallback)
+  eval time: 1.8934s
+Regular users evaluated: 465
+Cold-start interactions: 3337
+Total recommendations generated: 610
+    regular: {'HR@10': 0.243, 'NDCG@10': 0.0433, 'MAP': 0.0152}
+    cold_start: {'HR@10': 0.5379, 'NDCG@10': 0.1118, 'MAP': 0.0329}
+
+  Fitting two_tower...
+    two-tower [explicit] on mps: emb=32, layers=[64], neg=8, lr=0.001
+      epoch 1/50 train_loss=0.3381 val_NDCG@10=0.0492
+      epoch 2/50 train_loss=0.3144 val_NDCG@10=0.0462
+      epoch 3/50 train_loss=0.2916 val_NDCG@10=0.0461
+      epoch 4/50 train_loss=0.2510 val_NDCG@10=0.0538
+      epoch 5/50 train_loss=0.2211 val_NDCG@10=0.0542
+      epoch 6/50 train_loss=0.2065 val_NDCG@10=0.0553
+      epoch 7/50 train_loss=0.1942 val_NDCG@10=0.0558
+      epoch 8/50 train_loss=0.1820 val_NDCG@10=0.0537
+      epoch 9/50 train_loss=0.1703 val_NDCG@10=0.0529
+      epoch 10/50 train_loss=0.1633 val_NDCG@10=0.0574
+      epoch 11/50 train_loss=0.1568 val_NDCG@10=0.0582
+      epoch 12/50 train_loss=0.1503 val_NDCG@10=0.0564
+      epoch 13/50 train_loss=0.1460 val_NDCG@10=0.0523
+      epoch 14/50 train_loss=0.1415 val_NDCG@10=0.0588
+      epoch 15/50 train_loss=0.1386 val_NDCG@10=0.0640
+      epoch 16/50 train_loss=0.1352 val_NDCG@10=0.0621
+      epoch 17/50 train_loss=0.1325 val_NDCG@10=0.0634
+      epoch 18/50 train_loss=0.1309 val_NDCG@10=0.0681
+      epoch 19/50 train_loss=0.1285 val_NDCG@10=0.0631
+      epoch 20/50 train_loss=0.1263 val_NDCG@10=0.0601
+      epoch 21/50 train_loss=0.1251 val_NDCG@10=0.0595
+      epoch 22/50 train_loss=0.1233 val_NDCG@10=0.0604
+      epoch 23/50 train_loss=0.1219 val_NDCG@10=0.0572
+      early stopping at epoch 23
+      best val NDCG@10: 0.0681
+  training time: 311.0242s
+    [two_tower] cold-start: 145 embedding, 0 popularity fallback (0% fallback)
+  eval time: 1.2916s
+Regular users evaluated: 465
+Cold-start interactions: 3337
+Total recommendations generated: 610
+    regular: {'HR@10': 0.2323, 'NDCG@10': 0.0444, 'MAP': 0.0171}
+    cold_start: {'HR@10': 0.5379, 'NDCG@10': 0.1423, 'MAP': 0.0507}
+
+Results saved to results/movielens/metrics.csv
+               model  train_time_s  eval_time_s  regular_HR@10  regular_NDCG@10  regular_MAP  cold_start_HR@10  cold_start_NDCG@10  cold_start_MAP
+          popularity        0.0015       0.0361         0.1828           0.0366       0.0136            0.5310              0.1343          0.0480
+matrix_factorization        2.8637       1.1305         0.0860           0.0152       0.0051            0.5310              0.1343          0.0480
+                 ncf      210.4869       1.8934         0.2430           0.0433       0.0152            0.5379              0.1118          0.0329
+           two_tower      311.0242       1.2916         0.2323           0.0444       0.0171            0.5379              0.1423          0.0507
+
+ Completed execution of the pipeline for the chosen dataset
