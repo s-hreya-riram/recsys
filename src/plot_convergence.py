@@ -46,39 +46,13 @@ POP_COLOR = '#B07AA1'
 '''
 ncf_ml = [
     0.0481, 0.0490, 0.0534, 0.0551, 0.0531, 0.0535, 0.0540, 0.0585,
-    0.0576, 0.05781, 0.0581, 0.0557, 0.0556
+    0.0576, 0.0571, 0.0581, 0.0557, 0.0556
 ]
 ncf_ml_best = 8   # epoch of best val NDCG (1-indexed)
 
 # Two-Tower best config: emb=32, layers=[64], lr=0.001, n_neg=8
 # From tuning log
 '''
-    NCF training on mps: emb=32, layers=[128, 64, 32], neg=8, lr=0.001
-      epoch 1/50 train_loss=0.2647 val_NDCG@10=0.0481
-      epoch 2/50 train_loss=0.2444 val_NDCG@10=0.0490
-      epoch 3/50 train_loss=0.2380 val_NDCG@10=0.0534
-      epoch 4/50 train_loss=0.2249 val_NDCG@10=0.0551
-      epoch 5/50 train_loss=0.2044 val_NDCG@10=0.0531
-      epoch 6/50 train_loss=0.1922 val_NDCG@10=0.0535
-      epoch 7/50 train_loss=0.1819 val_NDCG@10=0.0540
-      epoch 8/50 train_loss=0.1719 val_NDCG@10=0.0585
-      epoch 9/50 train_loss=0.1642 val_NDCG@10=0.0576
-      epoch 10/50 train_loss=0.1569 val_NDCG@10=0.0571
-      epoch 11/50 train_loss=0.1524 val_NDCG@10=0.0581
-      epoch 12/50 train_loss=0.1478 val_NDCG@10=0.0557
-      epoch 13/50 train_loss=0.1436 val_NDCG@10=0.0556
-      early stopping at epoch 13
-      best val NDCG@10: 0.0585
-  training time: 210.4869s
-    [ncf] cold-start: 145 embedding, 0 popularity fallback (0% fallback)
-  eval time: 1.8934s
-Regular users evaluated: 465
-Cold-start interactions: 3337
-Total recommendations generated: 610
-    regular: {'HR@10': 0.243, 'NDCG@10': 0.0433, 'MAP': 0.0152}
-    cold_start: {'HR@10': 0.5379, 'NDCG@10': 0.1118, 'MAP': 0.0329}
-
-  Fitting two_tower...
     two-tower [explicit] on mps: emb=32, layers=[64], neg=8, lr=0.001
       epoch 1/50 train_loss=0.3381 val_NDCG@10=0.0492
       epoch 2/50 train_loss=0.3144 val_NDCG@10=0.0462

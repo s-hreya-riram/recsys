@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 *.ipynb
 results/movielens/two_tower_tuning_raw_logs.txt
+*.pdf
