@@ -209,13 +209,13 @@ def make_plot(ncf_data, tt_data, ncf_best, tt_best,
 make_plot(
     ncf_ml, tt_ml, ncf_ml_best, tt_ml_best,
     svd_ml_val, 'MF (SVD)', pop_ml_val,
-    'Figure 1: Convergence on MovieLens (Explicit Feedback)',
+    'Figure 4: Convergence on MovieLens (Explicit Feedback)',
     OUT_DIR / 'convergence_movielens.png',
 )
 
 make_plot(
     ncf_am, tt_am, ncf_am_best, tt_am_best,
     als_am_val, 'ALS', pop_am_val,
-    'Figure 2: Convergence on Amazon Music (Implicit Feedback)',
+    'Figure 5: Convergence on Amazon Music (Implicit Feedback)',
     OUT_DIR / 'convergence_amazonmusic.png',
 )
